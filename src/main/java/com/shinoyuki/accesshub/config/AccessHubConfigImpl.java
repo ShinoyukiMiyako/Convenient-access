@@ -56,6 +56,7 @@ public final class AccessHubConfigImpl implements AccessHubConfig {
             logger.info("已生成默认配置: {}", configFile);
         }
 
+        ensurePackDefaults();
         ensureSecrets();
     }
 
@@ -209,6 +210,42 @@ public final class AccessHubConfigImpl implements AccessHubConfig {
         return entry;
     }
 
+    private void ensurePackDefaults() {
+        boolean changed = false;
+        changed |= ensureSetting("pack.version-gate.enabled", false,
+                " 整合包版本门控总开关，发布异常时可立即关闭放行玩家");
+        changed |= ensureSetting("pack.version-gate.reject-message",
+                "&c整合包版本不匹配\n&7当前版本: {current}\n&7所需版本: {required}\n&7请使用 Aurora 更新后重试",
+                " 版本不匹配时的拒绝文案，可使用 {current} 与 {required} 占位符");
+        changed |= ensureSetting("pack.oss.enabled", false,
+                " 自研整合包文件上传总开关；填写以下全部配置后再手动开启");
+        changed |= ensureSetting("pack.oss.endpoint", "",
+                " 阿里云 OSS 地域 Endpoint，例如 https://oss-cn-hangzhou.aliyuncs.com，不含 bucket 与对象路径");
+        changed |= ensureSetting("pack.oss.bucket", "", " OSS Bucket 名称");
+        changed |= ensureSetting("pack.oss.access-key-id", "",
+                " 仅授予目标 bucket 写权限的 RAM AccessKey ID");
+        changed |= ensureSetting("pack.oss.access-key-secret", "",
+                " RAM AccessKey Secret；保持为空直到手动配置，本程序不会自动生成或输出到日志");
+        changed |= ensureSetting("pack.oss.public-base-url", "",
+                " 客户端公开下载基地址，可含 CDN 路径前缀，例如 https://cdn.example.com/wok");
+        if (changed) {
+            config.save();
+        }
+    }
+
+    private boolean ensureSetting(String path, Object defaultValue, String comment) {
+        boolean changed = false;
+        if (!config.contains(path)) {
+            config.set(path, defaultValue);
+            changed = true;
+        }
+        if (config.getComment(path) == null) {
+            config.setComment(path, comment);
+            changed = true;
+        }
+        return changed;
+    }
+
     /**
      * 确保 admin password / api token / jwt secret 三件套都已生成.
      */
@@ -325,6 +362,21 @@ public final class AccessHubConfigImpl implements AccessHubConfig {
     @Override public boolean isDeviceAuthEnabled()                  { return config.getOrElse("auth.device-auth.enabled", true); }
     @Override public int     getDeviceAuthChallengeTimeoutSeconds(){ return config.getIntOrElse("auth.device-auth.challenge-timeout-seconds", 15); }
     @Override public String  getServerInstanceId()                 { return config.getOrElse("auth.device-auth.server-instance-id", ""); }
+
+    @Override public boolean isPackVersionGateEnabled() { return config.getOrElse("pack.version-gate.enabled", false); }
+
+    @Override
+    public String getPackVersionRejectMessage() {
+        return config.getOrElse("pack.version-gate.reject-message",
+                "&c整合包版本不匹配\n&7当前版本: {current}\n&7所需版本: {required}\n&7请使用 Aurora 更新后重试");
+    }
+
+    @Override public boolean isPackOssEnabled()          { return config.getOrElse("pack.oss.enabled", false); }
+    @Override public String  getPackOssEndpoint()        { return config.getOrElse("pack.oss.endpoint", ""); }
+    @Override public String  getPackOssBucket()          { return config.getOrElse("pack.oss.bucket", ""); }
+    @Override public String  getPackOssAccessKeyId()     { return config.getOrElse("pack.oss.access-key-id", ""); }
+    @Override public String  getPackOssAccessKeySecret() { return config.getOrElse("pack.oss.access-key-secret", ""); }
+    @Override public String  getPackOssPublicBaseUrl()   { return config.getOrElse("pack.oss.public-base-url", ""); }
 
     @Override public boolean isBackupEnabled()       { return config.getOrElse("backup.enabled", true); }
     @Override public String  getBackupSchedule()     { return config.getOrElse("backup.schedule", "0:2:0"); }

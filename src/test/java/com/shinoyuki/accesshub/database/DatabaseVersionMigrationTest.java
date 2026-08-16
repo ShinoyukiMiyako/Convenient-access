@@ -19,12 +19,12 @@ import org.junit.jupiter.api.io.TempDir;
  * 复现历史缺陷: version 作主键时 INSERT OR REPLACE 写新版本号不冲突而追加成多行,
  * 无序 LIMIT 1 读到陈旧值导致每次重启重复迁移。断言修复后:
  *  - 新库初始化为单行、版本 = CURRENT_VERSION;
- *  - 脏的多行 v3 库升级后折叠为单行 v4 且建出注册码表。
+ *  - 脏的多行 v3 库升级后折叠为单行最新版本且跑完全部迁移。
  * 删掉单行不变量 / MAX 读取, 脏库用例必挂。
  */
 class DatabaseVersionMigrationTest {
 
-    private static final int CURRENT_VERSION = 8;
+    private static final int CURRENT_VERSION = 9;
 
     @TempDir
     File tempDir;
@@ -81,11 +81,13 @@ class DatabaseVersionMigrationTest {
         assertTrue(columnExists(db, "whitelist", "qq"), "新库 whitelist 应含 qq 列");
         assertTrue(tableExists(db, "admin_personal_codes"), "新库应建出个人识别码表");
         assertTrue(tableExists(db, "admin_qq_bindings"), "新库应建出 QQ 绑定表");
+        assertTrue(tableExists(db, "pack_version"), "新库应建出整合包版本表");
+        assertTrue(tableExists(db, "pack_entry"), "新库应建出整合包条目表");
         db.shutdown();
     }
 
     @Test
-    void dirtyMultiRowV3DbSelfHealsToSingleRowV4() throws Exception {
+    void dirtyMultiRowV3DbSelfHealsToSingleRowCurrentVersion() throws Exception {
         // 预置"脏库": 模拟历史缺陷累积的多行 version 表 {1,2,3}, 且尚无 v4 注册码表
         File dbFile = new File(tempDir, "whitelist.db");
         try (Connection c = DriverManager.getConnection("jdbc:sqlite:" + dbFile.getAbsolutePath());
@@ -123,6 +125,8 @@ class DatabaseVersionMigrationTest {
         assertTrue(columnExists(db, "whitelist", "qq"), "5->6 迁移应给 whitelist 加 qq 列");
         assertTrue(tableExists(db, "admin_personal_codes"), "7->8 迁移应建出个人识别码表");
         assertTrue(tableExists(db, "admin_qq_bindings"), "7->8 迁移应建出 QQ 绑定表");
+        assertTrue(tableExists(db, "pack_version"), "8->9 迁移应建出整合包版本表");
+        assertTrue(tableExists(db, "pack_entry"), "8->9 迁移应建出整合包条目表");
 
         // 6->7 重建 operation_log: 既有数据必须原样迁过来, 且新类型此时应可写入
         try (Connection c = db.getConnection();

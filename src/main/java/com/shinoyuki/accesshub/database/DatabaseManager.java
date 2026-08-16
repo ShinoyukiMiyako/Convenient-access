@@ -3,12 +3,16 @@ package com.shinoyuki.accesshub.database;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -43,9 +47,11 @@ public class DatabaseManager {
     private final String databasePath;
     private final ExecutorService executorService;
     private final AtomicBoolean initialized = new AtomicBoolean(false);
+    private final Object initializationMonitor = new Object();
+    private CompletableFuture<Boolean> initializationFuture;
 
     // 数据库版本
-    private static final int CURRENT_VERSION = 8; // v8: 新增 QQ Bot 绑定链路的个人识别码表与 QQ 绑定表
+    private static final int CURRENT_VERSION = 9; // v9: 新增整合包版本与文件条目
 
     public DatabaseManager(File dataFolder) {
         this.dataFolder = dataFolder;
@@ -62,47 +68,65 @@ public class DatabaseManager {
      * 初始化数据库
      */
     public CompletableFuture<Boolean> initialize() {
-        return CompletableFuture.supplyAsync(() -> {
-            try {
-                // 确保数据文件夹存在
-                if (!dataFolder.exists()) {
-                    dataFolder.mkdirs();
+        synchronized (initializationMonitor) {
+            if (initializationFuture == null) {
+                initializationFuture = CompletableFuture.supplyAsync(this::initializeDatabase, executorService);
+            }
+            return initializationFuture;
+        }
+    }
+
+    private boolean initializeDatabase() {
+        try {
+            if (!dataFolder.exists()) {
+                dataFolder.mkdirs();
+            }
+
+            try (Connection connection = getConnection()) {
+                try (Statement stmt = connection.createStatement()) {
+                    stmt.execute("PRAGMA journal_mode = WAL");
+                    stmt.execute("PRAGMA synchronous = NORMAL");
+                    stmt.execute("PRAGMA cache_size = 10000");
+                    stmt.execute("PRAGMA temp_store = MEMORY");
+                    stmt.execute("PRAGMA wal_autocheckpoint = 1000");
                 }
-                
-                // 创建数据库连接
-                try (Connection connection = getConnection()) {
-                    // 启用外键约束和优化并发性能
-                    try (Statement stmt = connection.createStatement()) {
-                        stmt.execute("PRAGMA foreign_keys = ON");
-                        stmt.execute("PRAGMA journal_mode = WAL");
-                        stmt.execute("PRAGMA synchronous = NORMAL");
-                        stmt.execute("PRAGMA cache_size = 10000");
-                        stmt.execute("PRAGMA temp_store = MEMORY");
-                        stmt.execute("PRAGMA busy_timeout = 30000"); // 设置30秒的锁等待超时
-                        stmt.execute("PRAGMA wal_autocheckpoint = 1000"); // WAL自动检查点
+
+                connection.setAutoCommit(false);
+                int currentVersion;
+                try {
+                    currentVersion = getDatabaseVersion(connection);
+                    if (currentVersion > CURRENT_VERSION) {
+                        throw new SQLException("数据库版本 " + currentVersion
+                                + " 高于程序支持的版本 " + CURRENT_VERSION);
                     }
-                    
-                    // 检查数据库版本
-                    int currentVersion = getDatabaseVersion(connection);
                     if (currentVersion == 0) {
-                        // 新数据库，创建所有表
                         createTables(connection);
                         setDatabaseVersion(connection, CURRENT_VERSION);
-                        logger.info("数据库初始化完成，版本: {}", CURRENT_VERSION);
                     } else if (currentVersion < CURRENT_VERSION) {
-                        // 需要升级
                         migrateDatabaseFrom(connection, currentVersion);
-                        logger.info("数据库升级完成，从版本 {} 升级到 {}", currentVersion, CURRENT_VERSION);
                     }
-                    
-                    initialized.set(true);
-                    return true;
+                    connection.commit();
+                } catch (SQLException | RuntimeException exception) {
+                    try {
+                        connection.rollback();
+                    } catch (SQLException rollbackError) {
+                        exception.addSuppressed(rollbackError);
+                    }
+                    throw exception;
                 }
-            } catch (Exception e) {
-                logger.error("数据库初始化失败", e);
-                return false;
+
+                if (currentVersion == 0) {
+                    logger.info("数据库初始化完成，版本: {}", CURRENT_VERSION);
+                } else if (currentVersion < CURRENT_VERSION) {
+                    logger.info("数据库升级完成，从版本 {} 升级到 {}", currentVersion, CURRENT_VERSION);
+                }
+                initialized.set(true);
+                return true;
             }
-        }, executorService);
+        } catch (Exception e) {
+            logger.error("数据库初始化失败", e);
+            return false;
+        }
     }
     
     /**
@@ -110,11 +134,18 @@ public class DatabaseManager {
      */
     public Connection getConnection() throws SQLException {
         Connection conn = DriverManager.getConnection("jdbc:sqlite:" + databasePath);
-        // 为每个连接设置 busy_timeout，处理并发锁等待
         try (Statement stmt = conn.createStatement()) {
+            // SQLite 外键开关是连接级配置，每个 DAO 连接都必须显式启用。
+            stmt.execute("PRAGMA foreign_keys = ON");
+            stmt.execute("PRAGMA recursive_triggers = ON");
             stmt.execute("PRAGMA busy_timeout = 30000"); // 30秒超时
         } catch (SQLException e) {
-            logger.warn("设置 busy_timeout 失败: {}", e.getMessage());
+            try {
+                conn.close();
+            } catch (SQLException closeError) {
+                e.addSuppressed(closeError);
+            }
+            throw e;
         }
         return conn;
     }
@@ -175,21 +206,15 @@ public class DatabaseManager {
             "schema/device_keys.sql",
             "schema/admin_personal_codes.sql",
             "schema/admin_qq_bindings.sql",
+            "schema/pack.sql",
             "schema/indexes.sql"
         };
         
-        int successCount = 0;
         for (String scriptPath : sqlScripts) {
-            try {
-                executeScript(connection, scriptPath);
-                successCount++;
-            } catch (SQLException e) {
-                logger.error("执行SQL脚本失败: {}", scriptPath, e);
-                // 继续执行其他脚本，不中断整个过程
-            }
+            executeScript(connection, scriptPath);
         }
         
-        logger.info("数据库表创建完成，成功执行 {}/{} 个脚本", successCount, sqlScripts.length);
+        logger.info("数据库表创建完成，共执行 {} 个脚本", sqlScripts.length);
         
         // 插入初始数据
         insertInitialData(connection);
@@ -201,26 +226,12 @@ public class DatabaseManager {
     private void executeScript(Connection connection, String scriptPath) throws SQLException {
         try (InputStream inputStream = getClass().getClassLoader().getResourceAsStream(scriptPath)) {
             if (inputStream == null) {
-                logger.warn("SQL脚本文件不存在: {}", scriptPath);
-                return;
+                throw new SQLException("SQL脚本文件不存在: " + scriptPath);
             }
             
-            String sql = new String(inputStream.readAllBytes());
-            
-            // 移除注释并处理多行语句
-            StringBuilder cleanSql = new StringBuilder();
-            String[] lines = sql.split("\n");
-            
-            for (String line : lines) {
-                String trimmedLine = line.trim();
-                // 跳过空行和注释行
-                if (!trimmedLine.isEmpty() && !trimmedLine.startsWith("--")) {
-                    cleanSql.append(line).append("\n");
-                }
-            }
-            
-            // 按分号分割语句，但要处理字符串中的分号
-            String[] statements = splitSqlStatements(cleanSql.toString());
+            String sql = new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
+
+            String[] statements = splitSqlStatements(sql);
             
             try (Statement stmt = connection.createStatement()) {
                 for (String statement : statements) {
@@ -245,38 +256,75 @@ public class DatabaseManager {
     /**
      * 智能分割SQL语句（处理字符串中的分号）
      */
-    private String[] splitSqlStatements(String sql) {
-        java.util.List<String> statements = new java.util.ArrayList<>();
+    String[] splitSqlStatements(String sql) {
+        List<String> statements = new ArrayList<>();
         StringBuilder currentStatement = new StringBuilder();
         boolean inString = false;
+        boolean inLineComment = false;
+        boolean inBlockComment = false;
         char stringChar = 0;
-        
+
         for (int i = 0; i < sql.length(); i++) {
             char c = sql.charAt(i);
-            
-            if (!inString && (c == '\'' || c == '"')) {
+
+            if (inLineComment) {
+                if (c == '\n' || c == '\r') {
+                    inLineComment = false;
+                    currentStatement.append(c);
+                }
+                continue;
+            }
+            if (inBlockComment) {
+                if (c == '*' && i + 1 < sql.length() && sql.charAt(i + 1) == '/') {
+                    inBlockComment = false;
+                    currentStatement.append(' ');
+                    i++;
+                }
+                continue;
+            }
+            if (inString) {
+                currentStatement.append(c);
+                if (c == stringChar) {
+                    if (i + 1 < sql.length() && sql.charAt(i + 1) == stringChar) {
+                        currentStatement.append(sql.charAt(++i));
+                    } else {
+                        inString = false;
+                    }
+                }
+                continue;
+            }
+            if (c == '-' && i + 1 < sql.length() && sql.charAt(i + 1) == '-') {
+                inLineComment = true;
+                i++;
+                continue;
+            }
+            if (c == '/' && i + 1 < sql.length() && sql.charAt(i + 1) == '*') {
+                inBlockComment = true;
+                i++;
+                continue;
+            }
+            if (c == '\'' || c == '"') {
                 inString = true;
                 stringChar = c;
-            } else if (inString && c == stringChar) {
-                // 检查是否是转义字符
-                if (i + 1 < sql.length() && sql.charAt(i + 1) == stringChar) {
-                    currentStatement.append(c);
-                    i++; // 跳过下一个字符
-                } else {
-                    inString = false;
-                }
-            } else if (!inString && c == ';') {
+                currentStatement.append(c);
+                continue;
+            }
+            if (c == ';') {
                 String statement = currentStatement.toString().trim();
+                if (isIncompleteTrigger(statement)) {
+                    currentStatement.append(c);
+                    continue;
+                }
                 if (!statement.isEmpty()) {
                     statements.add(statement);
                 }
                 currentStatement = new StringBuilder();
                 continue;
             }
-            
+
             currentStatement.append(c);
         }
-        
+
         // 添加最后一个语句
         String lastStatement = currentStatement.toString().trim();
         if (!lastStatement.isEmpty()) {
@@ -284,6 +332,78 @@ public class DatabaseManager {
         }
         
         return statements.toArray(new String[0]);
+    }
+
+    /** CREATE TRIGGER 的 BEGIN/END 块内也包含分号，不能按普通语句提前切开。 */
+    private boolean isIncompleteTrigger(String statement) {
+        List<String> tokens = sqlTokens(statement);
+        if (tokens.isEmpty() || !"CREATE".equals(tokens.get(0))) {
+            return false;
+        }
+        int index = 1;
+        if (index < tokens.size()
+                && ("TEMP".equals(tokens.get(index)) || "TEMPORARY".equals(tokens.get(index)))) {
+            index++;
+        }
+        if (index >= tokens.size() || !"TRIGGER".equals(tokens.get(index))) {
+            return false;
+        }
+
+        int blockDepth = 0;
+        int caseDepth = 0;
+        for (index++; index < tokens.size(); index++) {
+            String token = tokens.get(index);
+            if ("CASE".equals(token)) {
+                caseDepth++;
+            } else if ("BEGIN".equals(token) && caseDepth == 0) {
+                blockDepth++;
+            } else if ("END".equals(token)) {
+                if (caseDepth > 0) {
+                    caseDepth--;
+                } else if (blockDepth > 0) {
+                    blockDepth--;
+                }
+            }
+        }
+        return blockDepth > 0;
+    }
+
+    private List<String> sqlTokens(String sql) {
+        List<String> tokens = new ArrayList<>();
+        StringBuilder token = new StringBuilder();
+        boolean inString = false;
+        char stringChar = 0;
+        for (int i = 0; i < sql.length(); i++) {
+            char c = sql.charAt(i);
+            if (inString) {
+                if (c == stringChar) {
+                    if (i + 1 < sql.length() && sql.charAt(i + 1) == stringChar) {
+                        i++;
+                    } else {
+                        inString = false;
+                    }
+                }
+                continue;
+            }
+            if (c == '\'' || c == '"') {
+                flushSqlToken(tokens, token);
+                inString = true;
+                stringChar = c;
+            } else if (Character.isLetterOrDigit(c) || c == '_') {
+                token.append(Character.toUpperCase(c));
+            } else {
+                flushSqlToken(tokens, token);
+            }
+        }
+        flushSqlToken(tokens, token);
+        return tokens;
+    }
+
+    private void flushSqlToken(List<String> tokens, StringBuilder token) {
+        if (!token.isEmpty()) {
+            tokens.add(token.toString().toUpperCase(Locale.ROOT));
+            token.setLength(0);
+        }
     }
     
     /**
@@ -358,8 +478,7 @@ public class DatabaseManager {
         
         for (int version = fromVersion; version < CURRENT_VERSION; version++) {
             String migrationScript = "migrations/migrate_" + version + "_to_" + (version + 1) + ".sql";
-            // 迁移必需脚本缺失 (打包遗漏/路径笔误) 时 fail-fast: executeScript 对缺失资源仅 warn 不抛,
-            // 若放任会静默跳步并照常推进版本号, 造成"版本最新但表未建"。createTables 的可选 schema 宽松行为不受影响。
+            // 迁移必需脚本缺失时拒绝静默推进版本号。
             if (getClass().getClassLoader().getResource(migrationScript) == null) {
                 throw new SQLException("迁移脚本缺失, 拒绝静默跳步: " + migrationScript);
             }

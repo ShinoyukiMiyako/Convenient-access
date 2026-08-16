@@ -2,6 +2,7 @@ package com.shinoyuki.accesshub.deviceauth.net;
 
 import com.shinoyuki.accesshub.AccessHubMod;
 import com.shinoyuki.accesshub.deviceauth.DeviceAuthServer;
+import com.shinoyuki.accesshub.pack.net.PackVersionChannel;
 
 import net.minecraft.network.Connection;
 import net.minecraft.resources.ResourceLocation;
@@ -20,6 +21,7 @@ import net.minecraftforge.network.simple.SimpleChannel;
  *
  * 通道对象在类加载期 (static) 构造; 消息注册 (messageBuilder.add) 须在 FMLCommonSetupEvent
  * 调 register()。服务端验签器引用在装配期 setServer 设入, 包处理器惰性读取。
+ * 整合包版本门控使用独立的 LOGIN 握手通道版本表，不得复用本 PLAY 通道的 hello 包。
  */
 public final class AuthChannel {
 
@@ -41,6 +43,7 @@ public final class AuthChannel {
 
     /** 在 FMLCommonSetupEvent (MOD bus) 调用. 两端注册顺序必须一致, 否则包 id 错位。 */
     public static void register() {
+        PackVersionChannel.register();
         CHANNEL.messageBuilder(S2CChallenge.class, packetId++, NetworkDirection.PLAY_TO_CLIENT)
                 .encoder(S2CChallenge::encode)
                 .decoder(S2CChallenge::decode)

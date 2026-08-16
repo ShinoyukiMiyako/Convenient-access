@@ -16,6 +16,9 @@ import net.minecraftforge.network.NetworkEvent;
  * 改由客户端反向宣告后, 时序完全由客户端自己保证 (它一定在本地玩家就绪之后才发), 不依赖服务端某一时刻的
  * 通道视图。服务端收到即确证对端装了本 mod 且能处理挑战。
  *
+ * 本包不能承载进服版本门控：它在 PLAY 阶段才发送，晚于 PlayerNegotiationEvent。整合包版本改由
+ * PackVersionChannel 在 Forge LOGIN 握手的通道版本表中携带，避免玩家进入世界后才发现版本不符。
+ *
  * 包 id 追加在既有两个包之后, 老客户端不会发也不会收本包; 反过来新客户端连老服务端时, 老服务端只会
  * 记一条 "invalid discriminator" 并丢弃, 不影响密码登录。
  */

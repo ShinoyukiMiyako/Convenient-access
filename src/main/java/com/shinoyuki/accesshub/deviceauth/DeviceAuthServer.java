@@ -69,6 +69,7 @@ public final class DeviceAuthServer {
      * 客户端进入 PLAY 且本地玩家已创建后的主动宣告 (C2SHello)。
      *
      * 这是唯一不依赖服务端 isRemotePresent 时序的触发路径: 收到 hello 就确证对端装了本 mod 且已能处理挑战。
+     * 它只服务免密挑战，不能承担必须在 PlayerNegotiationEvent 完成的整合包版本门控。
      */
     public void onClientHello(ServerPlayer player) {
         DeviceAuthSession session = sessions.computeIfAbsent(player.getUUID(), k -> new DeviceAuthSession());

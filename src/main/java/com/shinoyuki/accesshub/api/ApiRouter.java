@@ -28,6 +28,9 @@ public class ApiRouter extends HttpServlet {
     private final ChatBridgeHandler chatBridgeHandler;
     private final OperationLogApiController operationLogController;
     private final BindingApiController bindingController;
+    private final PackPublicApiHandler packPublicApiHandler;
+    private final PackAdminApiController packAdminController;
+    private final PackUploadController packUploadController;
     private AdminAuthController adminAuthController;
     private final AccessHubConfig configManager;
 
@@ -38,6 +41,49 @@ public class ApiRouter extends HttpServlet {
                      OperationLogApiController operationLogController,
                      BindingApiController bindingController,
                      AdminAuthController adminAuthController, AccessHubConfig configManager) {
+        this(whitelistController, userController, playerDataController, serverInfoHandler,
+                itemIconHandler, networkInfoHandler, chatBridgeHandler, operationLogController,
+                bindingController, null, null, null, adminAuthController, configManager);
+    }
+
+    public ApiRouter(WhitelistApiController whitelistController, UserApiController userController,
+                     PlayerDataHandler playerDataController, ServerInfoHandler serverInfoHandler,
+                     ItemIconHandler itemIconHandler, NetworkInfoHandler networkInfoHandler,
+                     ChatBridgeHandler chatBridgeHandler,
+                     OperationLogApiController operationLogController,
+                     BindingApiController bindingController,
+                     PackPublicApiHandler packPublicApiHandler,
+                     AdminAuthController adminAuthController, AccessHubConfig configManager) {
+        this(whitelistController, userController, playerDataController, serverInfoHandler,
+                itemIconHandler, networkInfoHandler, chatBridgeHandler, operationLogController,
+                bindingController, packPublicApiHandler, null, null, adminAuthController, configManager);
+    }
+
+    public ApiRouter(WhitelistApiController whitelistController, UserApiController userController,
+                     PlayerDataHandler playerDataController, ServerInfoHandler serverInfoHandler,
+                     ItemIconHandler itemIconHandler, NetworkInfoHandler networkInfoHandler,
+                     ChatBridgeHandler chatBridgeHandler,
+                     OperationLogApiController operationLogController,
+                     BindingApiController bindingController,
+                     PackPublicApiHandler packPublicApiHandler,
+                     PackAdminApiController packAdminController,
+                     AdminAuthController adminAuthController, AccessHubConfig configManager) {
+        this(whitelistController, userController, playerDataController, serverInfoHandler,
+                itemIconHandler, networkInfoHandler, chatBridgeHandler, operationLogController,
+                bindingController, packPublicApiHandler, packAdminController, null,
+                adminAuthController, configManager);
+    }
+
+    public ApiRouter(WhitelistApiController whitelistController, UserApiController userController,
+                     PlayerDataHandler playerDataController, ServerInfoHandler serverInfoHandler,
+                     ItemIconHandler itemIconHandler, NetworkInfoHandler networkInfoHandler,
+                     ChatBridgeHandler chatBridgeHandler,
+                     OperationLogApiController operationLogController,
+                     BindingApiController bindingController,
+                     PackPublicApiHandler packPublicApiHandler,
+                     PackAdminApiController packAdminController,
+                     PackUploadController packUploadController,
+                     AdminAuthController adminAuthController, AccessHubConfig configManager) {
         this.whitelistController = whitelistController;
         this.userController = userController;
         this.playerDataController = playerDataController;
@@ -47,6 +93,9 @@ public class ApiRouter extends HttpServlet {
         this.chatBridgeHandler = chatBridgeHandler;
         this.operationLogController = operationLogController;
         this.bindingController = bindingController;
+        this.packPublicApiHandler = packPublicApiHandler;
+        this.packAdminController = packAdminController;
+        this.packUploadController = packUploadController;
         this.adminAuthController = adminAuthController;
         this.configManager = configManager;
     }
@@ -68,7 +117,7 @@ public class ApiRouter extends HttpServlet {
         }
         
         // 公开的端点不需要认证
-        if (isPublicEndpoint(path)) {
+        if (isPublicEndpoint(request, path)) {
             return true;
         }
         
@@ -93,6 +142,12 @@ public class ApiRouter extends HttpServlet {
         }
         
         // 检查API Token (用于非管理员的API访问，constant-time 比较防 timing attack)
+        // Pack management changes the client release state and must never inherit
+        // the backend/Bot API-key privilege used by other private endpoints.
+        if (isPackAdministrationPath(path)) {
+            return false;
+        }
+
         String apiKey = request.getHeader("X-API-Key");
         if (apiKey != null) {
             String validToken = configManager.getApiToken();
@@ -107,17 +162,52 @@ public class ApiRouter extends HttpServlet {
         return false;
     }
 
+    private static boolean isPackAdministrationPath(String path) {
+        return path != null && path.startsWith("/api/v1/pack/");
+    }
+
     /**
      * 判断是否为公开端点（不需要认证）
      */
-    private boolean isPublicEndpoint(String path) {
-        return path.equals("/api/v1/admin/login") ||
+    private boolean isPublicEndpoint(HttpServletRequest request, String path) {
+        if (path == null) {
+            return false;
+        }
+        if (path.equals("/api/v1/admin/login") ||
                path.equals("/api/v1/admin/register") ||
                // 物品图标必须公开: <img> 标签无法携带 Authorization/X-API-Key 头
                path.equals("/api/v1/item-icon") ||
                // 线路状态供玩家自查页面匿名访问; 该端点只输出各线路人数与连接地址,
                // 不含玩家名单与客户端 IP, 公开无隐私风险
-               path.equals("/api/v1/net/nodes");
+               path.equals("/api/v1/net/nodes")) {
+            return true;
+        }
+
+        if (!"GET".equalsIgnoreCase(request.getMethod())) {
+            return false;
+        }
+        return path.equals("/api/v1/pack/latest") || extractManifestVersion(path) != null;
+    }
+
+    private static String extractManifestVersion(String path) {
+        String prefix = "/api/v1/pack/manifest/";
+        if (path == null || !path.startsWith(prefix)) {
+            return null;
+        }
+        String version = path.substring(prefix.length());
+        return PackPublicService.isValidVersion(version) ? version : null;
+    }
+
+    private static String extractPathSegment(String path, String prefix, String suffix) {
+        if (path == null || !path.startsWith(prefix) || !path.endsWith(suffix)) {
+            return null;
+        }
+        int end = path.length() - suffix.length();
+        if (end <= prefix.length()) {
+            return null;
+        }
+        String segment = path.substring(prefix.length(), end);
+        return segment.indexOf('/') < 0 ? segment : null;
     }
 
     /**
@@ -149,8 +239,24 @@ public class ApiRouter extends HttpServlet {
         }
 
         try {
+            String versionId = extractPathSegment(path, "/api/v1/pack/versions/", "");
+            String entryId = extractPathSegment(path, "/api/v1/pack/entries/", "");
+            if (versionId != null) {
+                if (packAdminController != null) {
+                    packAdminController.handleUpdateVersion(versionId, request, response);
+                } else {
+                    send503Response(response, "Pack administration service not available");
+                }
+            }
+            else if (entryId != null) {
+                if (packAdminController != null) {
+                    packAdminController.handleUpdateEntry(entryId, request, response);
+                } else {
+                    send503Response(response, "Pack administration service not available");
+                }
+            }
             // 启用/禁用某条白名单: PUT /api/v1/whitelist/by-name/{name}/status
-            if (path != null && path.startsWith("/api/v1/whitelist/by-name/") && path.endsWith("/status")) {
+            else if (path != null && path.startsWith("/api/v1/whitelist/by-name/") && path.endsWith("/status")) {
                 String name = path.substring("/api/v1/whitelist/by-name/".length(), path.length() - "/status".length());
                 whitelistController.handleSetActive(request, response, name);
             } else {
@@ -180,8 +286,49 @@ public class ApiRouter extends HttpServlet {
         }
         
         try {
+            String versionEntriesId = extractPathSegment(path, "/api/v1/pack/versions/", "/entries");
+            String versionDiffId = extractPathSegment(path, "/api/v1/pack/versions/", "/diff");
+            if (path == null) {
+                send404Response(response, "API endpoint not found");
+            }
+            // 当前发布版本指针与不可变历史清单均在玩家登录前公开读取
+            else if (path.equals("/api/v1/pack/latest")) {
+                if (packPublicApiHandler != null) {
+                    packPublicApiHandler.handleLatest(request, response);
+                } else {
+                    send503Response(response, "Pack manifest service not available");
+                }
+            }
+            else if (extractManifestVersion(path) != null) {
+                if (packPublicApiHandler != null) {
+                    packPublicApiHandler.handleManifest(request, response, extractManifestVersion(path));
+                } else {
+                    send503Response(response, "Pack manifest service not available");
+                }
+            }
+            else if (path.equals("/api/v1/pack/versions")) {
+                if (packAdminController != null) {
+                    packAdminController.handleListVersions(request, response);
+                } else {
+                    send503Response(response, "Pack administration service not available");
+                }
+            }
+            else if (versionEntriesId != null) {
+                if (packAdminController != null) {
+                    packAdminController.handleListEntries(versionEntriesId, request, response);
+                } else {
+                    send503Response(response, "Pack administration service not available");
+                }
+            }
+            else if (versionDiffId != null) {
+                if (packAdminController != null) {
+                    packAdminController.handleDiff(versionDiffId, request, response);
+                } else {
+                    send503Response(response, "Pack administration service not available");
+                }
+            }
             // 操作日志相关路由
-            if (path.startsWith("/api/v1/logs/operations")) {
+            else if (path.startsWith("/api/v1/logs/operations")) {
                 if (path.equals("/api/v1/logs/operations")) {
                     operationLogController.handleGetOperationLogs(request, response);
                 } else if (path.equals("/api/v1/logs/operations/stats")) {
@@ -285,8 +432,56 @@ public class ApiRouter extends HttpServlet {
         }
         
         try {
+            String versionEntriesId = extractPathSegment(path, "/api/v1/pack/versions/", "/entries");
+            String versionUploadId = extractPathSegment(path, "/api/v1/pack/versions/", "/upload");
+            String versionPublishId = extractPathSegment(path, "/api/v1/pack/versions/", "/publish");
+            String versionRollbackId = extractPathSegment(path, "/api/v1/pack/versions/", "/rollback");
+            if (path == null) {
+                send404Response(response, "API endpoint not found");
+            }
+            else if (path.equals("/api/v1/pack/versions")) {
+                if (packAdminController != null) {
+                    packAdminController.handleCreateVersion(request, response);
+                } else {
+                    send503Response(response, "Pack administration service not available");
+                }
+            }
+            else if (versionEntriesId != null) {
+                if (packAdminController != null) {
+                    packAdminController.handleAddEntry(versionEntriesId, request, response);
+                } else {
+                    send503Response(response, "Pack administration service not available");
+                }
+            }
+            else if (versionUploadId != null) {
+                if (packUploadController != null) {
+                    try {
+                        packUploadController.handleUploadAsync(
+                                PackAdminApiController.parsePositiveId(versionUploadId), request, response);
+                    } catch (IllegalArgumentException exception) {
+                        ApiSupport.sendJson(response, HttpServletResponse.SC_BAD_REQUEST,
+                                ApiResponse.badRequest(exception.getMessage()));
+                    }
+                } else {
+                    send503Response(response, "Pack upload service not available");
+                }
+            }
+            else if (versionPublishId != null) {
+                if (packAdminController != null) {
+                    packAdminController.handlePublish(versionPublishId, request, response);
+                } else {
+                    send503Response(response, "Pack administration service not available");
+                }
+            }
+            else if (versionRollbackId != null) {
+                if (packAdminController != null) {
+                    packAdminController.handleRollback(versionRollbackId, request, response);
+                } else {
+                    send503Response(response, "Pack administration service not available");
+                }
+            }
             // 白名单相关路由
-             if (path.startsWith("/api/v1/whitelist")) {
+             else if (path.startsWith("/api/v1/whitelist")) {
                  if (path.equals("/api/v1/whitelist")) {
                      whitelistController.handleAddPlayer(request, response);
                  } else if (path.equals("/api/v1/whitelist/batch")) {
@@ -362,8 +557,19 @@ public class ApiRouter extends HttpServlet {
         }
         
         try {
+             String entryId = extractPathSegment(path, "/api/v1/pack/entries/", "");
+             if (path == null) {
+                 send404Response(response, "API endpoint not found");
+             }
              // 解除 QQ 绑定 (?qq=)
-             if (path.equals("/api/v1/bot/binding")) {
+             else if (entryId != null) {
+                 if (packAdminController != null) {
+                     packAdminController.handleDeleteEntry(entryId, request, response);
+                 } else {
+                     send503Response(response, "Pack administration service not available");
+                 }
+             }
+             else if (path.equals("/api/v1/bot/binding")) {
                  bindingController.handleBotUnbind(request, response);
              }
              // 白名单删除路由

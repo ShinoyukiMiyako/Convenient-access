@@ -4,6 +4,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 
 import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -17,6 +18,7 @@ import jakarta.servlet.http.HttpServletResponse;
 public final class ApiSupport {
 
     private static final Gson GSON = new Gson();
+    private static final Gson GSON_WITH_NULLS = new GsonBuilder().serializeNulls().create();
 
     private ApiSupport() {
     }
@@ -34,13 +36,24 @@ public final class ApiSupport {
 
     /** 写出统一包装的 JSON 响应, 并把 ApiResponse.code 对齐到 HTTP 状态码。 */
     public static void sendJson(HttpServletResponse response, int status, ApiResponse<?> body) throws IOException {
+        sendJson(response, status, body, GSON);
+    }
+
+    /** Writes pack wire DTOs whose nullable fields are part of the explicit frontend contract. */
+    public static void sendJsonWithNulls(HttpServletResponse response, int status, ApiResponse<?> body)
+            throws IOException {
+        sendJson(response, status, body, GSON_WITH_NULLS);
+    }
+
+    private static void sendJson(HttpServletResponse response, int status, ApiResponse<?> body, Gson gson)
+            throws IOException {
         response.setStatus(status);
         if (body != null) {
             body.setCode(status);
         }
         response.setContentType("application/json");
         response.setCharacterEncoding("UTF-8");
-        response.getWriter().write(GSON.toJson(body));
+        response.getWriter().write(gson.toJson(body));
         response.getWriter().flush();
     }
 

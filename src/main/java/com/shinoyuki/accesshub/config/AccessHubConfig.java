@@ -74,6 +74,18 @@ public interface AccessHubConfig {
     int getDeviceAuthChallengeTimeoutSeconds();
     String getServerInstanceId();   // 签名域分隔用, 首启自动生成并持久化
 
+    // 整合包版本门控
+    boolean isPackVersionGateEnabled();
+    String getPackVersionRejectMessage();
+
+    // 整合包自研文件 OSS 上传
+    boolean isPackOssEnabled();
+    String getPackOssEndpoint();
+    String getPackOssBucket();
+    String getPackOssAccessKeyId();
+    String getPackOssAccessKeySecret();
+    String getPackOssPublicBaseUrl();
+
     // 数据库自动备份
     boolean isBackupEnabled();
     String getBackupSchedule();      // "天:小时:分钟", 如 "0:2:0" = 每天 02:00

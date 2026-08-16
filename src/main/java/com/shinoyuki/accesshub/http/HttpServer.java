@@ -1,7 +1,12 @@
 package com.shinoyuki.accesshub.http;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Objects;
 
+import org.eclipse.jetty.server.HttpConfiguration;
+import org.eclipse.jetty.server.HttpConnectionFactory;
 import org.eclipse.jetty.server.Request;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
@@ -12,7 +17,9 @@ import org.slf4j.LoggerFactory;
 
 import com.shinoyuki.accesshub.api.ApiRouter;
 import com.shinoyuki.accesshub.config.AccessHubConfig;
+import com.shinoyuki.accesshub.modpack.oss.OssPutClient;
 
+import jakarta.servlet.MultipartConfigElement;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
@@ -26,21 +33,39 @@ import jakarta.servlet.http.HttpServletResponse;
  */
 public class HttpServer {
 
+    public static final long MAX_MULTIPART_FILE_SIZE = OssPutClient.MAX_FILE_SIZE;
+    public static final long MAX_MULTIPART_REQUEST_SIZE = MAX_MULTIPART_FILE_SIZE + 1024L * 1024;
+
+    private static final int MULTIPART_FILE_SIZE_THRESHOLD = 1024 * 1024;
+    static final int MIN_HTTP_THREADS = 10;
     private static final Logger logger = LoggerFactory.getLogger(HttpServer.class);
 
     private final AccessHubConfig config;
     private final ApiRouter apiRouter;
+    private final Path multipartTempDirectory;
+    private MultipartConfigElement multipartConfig;
     private Server server;
+    private ServerConnector connector;
 
     public HttpServer(AccessHubConfig config, ApiRouter apiRouter) {
-        this.config = config;
+        this(
+                config,
+                apiRouter,
+                Path.of(System.getProperty("java.io.tmpdir"), "shinoyuki-accesshub", "multipart"));
+    }
+
+    public HttpServer(AccessHubConfig config, ApiRouter apiRouter, Path multipartTempDirectory) {
+        this.config = Objects.requireNonNull(config, "config");
         this.apiRouter = apiRouter;
+        this.multipartTempDirectory = Objects.requireNonNull(multipartTempDirectory, "multipartTempDirectory");
     }
 
     public void start() throws Exception {
         int port = config.getHttpPort();
         String host = config.getHttpHost();
-        int maxThreads = config.getMaxThreads();
+        int maxThreads = Math.max(config.getMaxThreads(), MIN_HTTP_THREADS);
+        long idleTimeout = Math.max(0L, config.getTimeout());
+        multipartConfig = createMultipartConfig(multipartTempDirectory);
 
         QueuedThreadPool threadPool = new QueuedThreadPool(maxThreads, 2);
         threadPool.setName("AccessHub-HTTP");
@@ -48,10 +73,12 @@ public class HttpServer {
         server = new Server(threadPool);
         server.setHandler(new ApiHandler());
 
-        ServerConnector connector = new ServerConnector(server);
+        connector = new ServerConnector(
+                server,
+                new HttpConnectionFactory(createHttpConfiguration(idleTimeout)));
         connector.setHost(host);
         connector.setPort(port);
-        connector.setIdleTimeout(config.getTimeout());
+        connector.setIdleTimeout(idleTimeout);
 
         server.addConnector(connector);
         server.start();
@@ -105,6 +132,10 @@ public class HttpServer {
         return server != null && server.isRunning();
     }
 
+    int getLocalPort() {
+        return connector == null ? -1 : connector.getLocalPort();
+    }
+
     /**
      * API 请求处理器, 所有路径统一交给 ApiRouter.
      *
@@ -117,6 +148,7 @@ public class HttpServer {
                           HttpServletResponse response) throws IOException {
 
             baseRequest.setHandled(true);
+            baseRequest.setAttribute(Request.__MULTIPART_CONFIG_ELEMENT, multipartConfig);
 
             try {
                 setCorsHeaders(response);
@@ -166,5 +198,20 @@ public class HttpServer {
                 response.setHeader("Access-Control-Max-Age", "3600");
             }
         }
+    }
+
+    static MultipartConfigElement createMultipartConfig(Path tempDirectory) throws IOException {
+        Files.createDirectories(tempDirectory);
+        return new MultipartConfigElement(
+                tempDirectory.toAbsolutePath().normalize().toString(),
+                MAX_MULTIPART_FILE_SIZE,
+                MAX_MULTIPART_REQUEST_SIZE,
+                MULTIPART_FILE_SIZE_THRESHOLD);
+    }
+
+    static HttpConfiguration createHttpConfiguration(long idleTimeout) {
+        HttpConfiguration configuration = new HttpConfiguration();
+        configuration.setIdleTimeout(Math.max(0L, idleTimeout));
+        return configuration;
     }
 }

@@ -12,6 +12,11 @@ import com.shinoyuki.accesshub.api.ChatBridgeHandler;
 import com.shinoyuki.accesshub.api.ChatBridgeHandlerImpl;
 import com.shinoyuki.accesshub.api.ItemIconHandler;
 import com.shinoyuki.accesshub.api.OperationLogApiController;
+import com.shinoyuki.accesshub.api.PackAdminApiController;
+import com.shinoyuki.accesshub.api.PackPublicApiHandler;
+import com.shinoyuki.accesshub.api.PackPublicApiHandlerImpl;
+import com.shinoyuki.accesshub.api.PackPublicService;
+import com.shinoyuki.accesshub.api.PackUploadController;
 import com.shinoyuki.accesshub.api.PlayerDataHandler;
 import com.shinoyuki.accesshub.api.PlayerDataHandlerImpl;
 import com.shinoyuki.accesshub.api.ServerInfoHandler;
@@ -48,6 +53,9 @@ import com.shinoyuki.accesshub.net.NodeRelayServer;
 import com.shinoyuki.accesshub.net.NodeSessionRegistry;
 import com.shinoyuki.accesshub.net.ProbeServer;
 import com.shinoyuki.accesshub.operation.OperationLogDao;
+import com.shinoyuki.accesshub.pack.PackAdminService;
+import com.shinoyuki.accesshub.pack.PackDao;
+import com.shinoyuki.accesshub.pack.PackVersionGate;
 import com.shinoyuki.accesshub.whitelist.WhitelistManager;
 
 import net.minecraft.commands.Commands;
@@ -78,6 +86,7 @@ public final class AccessHubMod {
     private PlayerAuthService playerAuthService;
     private DeviceAuthServer deviceAuthServer;
     private HttpServer httpServer;
+    private PackUploadController packUploadController;
     private BackupManager backupManager;
     private SparkIntegration sparkIntegration;
     private NodeSessionRegistry nodeSessionRegistry;
@@ -154,6 +163,9 @@ public final class AccessHubMod {
         // QQ Bot 绑定链路: 管理员在面板签发个人识别码, 私聊发给 Bot 完成 QQ 认领
         PersonalCodeManager personalCodeManager = new PersonalCodeManager(databaseManager);
         QqBindingDao qqBindingDao = new QqBindingDao(databaseManager);
+        PackDao packDao = new PackDao(databaseManager);
+        PackAdminService packAdminService = new PackAdminService(packDao);
+        PackVersionGate packVersionGate = new PackVersionGate(config, packDao);
 
         // 5. 认证服务
         LoginAttemptService loginAttempt = new LoginAttemptService(
@@ -194,6 +206,11 @@ public final class AccessHubMod {
         // 外部渠道 (QQ #say) 投递到游戏内公屏
         ChatBridgeHandler chatBridgeHandler = new ChatBridgeHandlerImpl(server);
         BindingApiController bindingController = new BindingApiController(personalCodeManager, qqBindingDao);
+        PackPublicApiHandler packPublicApiHandler =
+                new PackPublicApiHandlerImpl(new PackPublicService(packDao));
+        PackAdminApiController packAdminController = new PackAdminApiController(packAdminService);
+        Path uploadTempDirectory = baseDir.resolve("upload-tmp");
+        packUploadController = new PackUploadController(packAdminService, config, uploadTempDirectory);
 
         // 线路会话表. 无条件创建: 转发器未启用时它恒为空表, 查询直接返回 null,
         // 依赖方 (登录监听器/统计端点) 无需各自做 null 分支。
@@ -207,13 +224,14 @@ public final class AccessHubMod {
                 itemIconHandler, networkInfoHandler,
                 chatBridgeHandler,
                 operationLogController, bindingController,
+                packPublicApiHandler, packAdminController, packUploadController,
                 adminAuthController,
                 config
         );
 
         // 7. HTTP 服务器
         if (config.isHttpEnabled()) {
-            httpServer = new HttpServer(config, apiRouter);
+            httpServer = new HttpServer(config, apiRouter, uploadTempDirectory);
             httpServer.start();
         } else {
             LOGGER.info("HTTP 服务器在配置中已禁用, 跳过启动");
@@ -223,7 +241,7 @@ public final class AccessHubMod {
         // 注册到 EVENT_BUS, 实例持有 config / whitelistManager / databaseManager 依赖.
         // 不放进 mod 启动早期是因为它依赖 whitelistManager 已初始化完成 (步骤 4).
         PlayerLoginListener loginListener = new PlayerLoginListener(
-                config, whitelistManager, databaseManager, nodeSessionRegistry);
+                config, whitelistManager, databaseManager, nodeSessionRegistry, packVersionGate);
         MinecraftForge.EVENT_BUS.register(loginListener);
         LOGGER.info("白名单登录监听器已注册到事件总线");
 
@@ -307,6 +325,9 @@ public final class AccessHubMod {
         }
         if (backupManager != null) {
             try { backupManager.shutdown(); } catch (Throwable t) { LOGGER.warn("备份管理器关闭异常", t); }
+        }
+        if (packUploadController != null) {
+            try { packUploadController.close(); } catch (Throwable t) { LOGGER.warn("整合包上传服务关闭异常", t); }
         }
         if (httpServer != null) {
             try { httpServer.stop(); } catch (Throwable t) { LOGGER.warn("HTTP 服务器关闭异常 (不影响关服)", t); }
