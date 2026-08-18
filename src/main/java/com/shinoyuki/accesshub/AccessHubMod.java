@@ -56,6 +56,7 @@ import com.shinoyuki.accesshub.operation.OperationLogDao;
 import com.shinoyuki.accesshub.pack.PackAdminService;
 import com.shinoyuki.accesshub.pack.PackDao;
 import com.shinoyuki.accesshub.pack.PackVersionGate;
+import com.shinoyuki.accesshub.tablist.TabListService;
 import com.shinoyuki.accesshub.whitelist.WhitelistManager;
 
 import net.minecraft.commands.Commands;
@@ -260,6 +261,11 @@ public final class AccessHubMod {
 
         // 10. 多线路接入 (frp 中转 + 家宽直连) 与延迟探针
         startNetworkServices(server);
+
+        // 11. Tab 列表增强. 与上面几个监听器同样常驻注册, 内部先判 tablist.enabled, 关闭时零开销放行,
+        // 这样 /accesshub reload 改开关后无需重启即可生效.
+        MinecraftForge.EVENT_BUS.register(new TabListService(config, server));
+        LOGGER.info("Tab 列表增强已注册到事件总线 (tablist.enabled={})", config.isTabListEnabled());
     }
 
     /**

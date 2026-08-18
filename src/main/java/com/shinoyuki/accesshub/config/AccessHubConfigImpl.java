@@ -57,6 +57,7 @@ public final class AccessHubConfigImpl implements AccessHubConfig {
         }
 
         ensurePackDefaults();
+        ensureTabListDefaults();
         ensureSecrets();
     }
 
@@ -249,6 +250,21 @@ public final class AccessHubConfigImpl implements AccessHubConfig {
     /**
      * 确保 admin password / api token / jwt secret 三件套都已生成.
      */
+    private void ensureTabListDefaults() {
+        boolean changed = false;
+        changed |= ensureSetting("tablist.enabled", true,
+                " Tab 列表增强总开关；关闭后回到原版 Tab, 不再发送 header/footer 与延迟后缀");
+        changed |= ensureSetting("tablist.latency-green-threshold", 60,
+                " 延迟低于此值显示绿色 (毫秒)");
+        changed |= ensureSetting("tablist.latency-yellow-threshold", 120,
+                " 延迟低于此值显示黄色, 否则红色 (毫秒)");
+        changed |= ensureSetting("tablist.broadcast-interval-ticks", 10,
+                " 两次 Tab 刷新之间的服务端 tick 数, 10 = 每秒 2 次；调大可降低广播开销");
+        if (changed) {
+            config.save();
+        }
+    }
+
     private void ensureSecrets() {
         if (getAdminPassword().isEmpty()) {
             String pwd = generateRandomString(12, CHARSET_ALPHANUMERIC);
@@ -412,6 +428,11 @@ public final class AccessHubConfigImpl implements AccessHubConfig {
     @Override public boolean isProbeEnabled()   { return config.getOrElse("network.probe.enabled", false); }
     @Override public String  getProbeBindHost() { return config.getOrElse("network.probe.bind-host", "127.0.0.1"); }
     @Override public int     getProbePort()     { return config.getIntOrElse("network.probe.port", 25610); }
+
+    @Override public boolean isTabListEnabled()                { return config.getOrElse("tablist.enabled", true); }
+    @Override public int     getTabListLatencyGreen()          { return config.getIntOrElse("tablist.latency-green-threshold", 60); }
+    @Override public int     getTabListLatencyYellow()         { return config.getIntOrElse("tablist.latency-yellow-threshold", 120); }
+    @Override public int     getTabListBroadcastIntervalTicks(){ return config.getIntOrElse("tablist.broadcast-interval-ticks", 10); }
 
     @Override public boolean isLogRequests() { return config.getOrElse("logging.log-requests", false); }
     @Override public boolean isDebug()       { return config.getOrElse("logging.debug", false); }

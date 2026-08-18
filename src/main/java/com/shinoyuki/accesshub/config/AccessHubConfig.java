@@ -103,6 +103,12 @@ public interface AccessHubConfig {
     String getProbeBindHost();
     int getProbePort();
 
+    // Tab 列表 (服务端权威渲染, 客户端无需装 mod)
+    boolean isTabListEnabled();
+    int getTabListLatencyGreen();
+    int getTabListLatencyYellow();
+    int getTabListBroadcastIntervalTicks();
+
     // 日志
     boolean isLogRequests();
     boolean isDebug();
