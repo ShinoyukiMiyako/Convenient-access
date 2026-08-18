@@ -132,6 +132,10 @@ tasks.named('processResources', ProcessResources).configure {
     ]
     inputs.properties replaceProperties
 
+    // expand 默认按平台编码读写, 中文 Windows(GBK)下会把 mods.toml 里的中文注释
+    // 打成 '?' 字节, 导致 Forge 解析 mods.toml 抛 MalformedInputException 起不来服
+    filteringCharset = 'UTF-8'
+
     filesMatching(['META-INF/mods.toml']) {
         expand replaceProperties
     }
