@@ -10,6 +10,14 @@ plugins {
 version = mod_version
 group = mod_group_id
 
+// sqlite-jdbc 不能和别的 mod 共存于 shade: 它按包路径加载 org/sqlite/native/** 原生库, 不可 relocate,
+// 于是 fat jar 会把 org.sqlite.* 直接导出到本模块。一旦另一个 mod (miningdim / cairn) 用 jarJar 把同一个
+// 库作为独立模块嵌入, JPMS 就会因两个模块导出同一个包而拒绝启动
+// (ResolutionException: Modules org.xerial.sqlitejdbc and shinoyuki_accesshub export package org.sqlite.date)。
+// 故改走 jarJar: 由 Forge 在模块层按版本范围仲裁出唯一实例, 多 mod 内嵌同库时自动去重。
+// enable() 必须先于 jarJar 依赖声明调用, 否则配置不生效。
+jarJar.enable()
+
 base {
     archivesName = mod_id
 }
@@ -77,8 +85,16 @@ dependencies {
     shade 'org.eclipse.jetty:jetty-servlet:11.0.20'
     shade 'jakarta.servlet:jakarta.servlet-api:5.0.0'
 
-    // 持久化 (SQLite 单文件) — 必须 shade 进 jar, 含各平台原生库
-    shade 'org.xerial:sqlite-jdbc:3.42.0.0'
+    // 持久化 (SQLite 单文件) — 走 jarJar 而非 shade, 理由见文件头 jarJar.enable() 处的说明。
+    //   - implementation: 编译期可见 + 传递到 testRuntime (测试直连 SQLite, 不经打包产物)。
+    //     它不会被 shadowJar 打包 —— shadowJar 只取 configurations.shade。
+    //   - jarJar: 内嵌进 META-INF/jarjar, 运行期由 FML 的 JarJar 机制作为独立模块加载。
+    //     版本范围上界取下一个大版本(4.0)而非小版本: 范围写窄了, 别的 mod 内嵌更新的 sqlite-jdbc 时
+    //     两个范围不相交, Forge 模块层会直接判定依赖冲突拒绝启动。
+    implementation 'org.xerial:sqlite-jdbc:3.46.1.3'
+    jarJar(group: 'org.xerial', name: 'sqlite-jdbc', version: '[3.45.3.0,4.0)') {
+        jarJar.pin(it, '3.46.1.3')
+    }
 
     // 密码哈希 (玩家离线认证) — 纯 Java bcrypt, 必须 shade 进 jar, Forge 运行期不提供。
     // 传递依赖 at.favre.lib:bytes 会一并被 shade。两者均含 module-info.class,
@@ -157,9 +173,11 @@ tasks.named('jar', Jar).configure {
     }
 }
 
-// fat jar: 合并 shade 依赖 + mod 类。archiveClassifier='' 使其成为主产物 shinoyuki_accesshub-<ver>.jar
+// fat jar: 合并 shade 依赖 + mod 类。它是【中间件】而非对外产物 ——
+// sqlite 必须以嵌套 jar 的形态存在 (独立 JPMS 模块), 而 shadow 的既定行为是把遇到的 jar 一律展开合并,
+// 无法在同一个任务里既 relocate Jetty 又保住嵌套结构。故由下方 jarJar 任务基于本产物再封一层。
 tasks.named('shadowJar', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar).configure {
-    archiveClassifier = ''
+    archiveClassifier = 'shaded'
     configurations = [project.configurations.shade]
 
     // 只 relocate Jetty: 自包含、避免与其它 mod 的 HTTP 栈冲突。
@@ -171,7 +189,8 @@ tasks.named('shadowJar', com.github.jengelman.gradle.plugins.shadow.tasks.Shadow
     relocate 'at.favre.lib.crypto', 'com.shinoyuki.accesshub.libs.favre.crypto'
     relocate 'at.favre.lib.bytes', 'com.shinoyuki.accesshub.libs.favre.bytes'
 
-    // 合并 META-INF/services (Jetty 的 ServiceLoader 文件 + sqlite 的 java.sql.Driver), 否则被覆盖丢失
+    // 合并 META-INF/services (Jetty 的 ServiceLoader 文件), 否则被覆盖丢失。
+    // sqlite 的 java.sql.Driver 服务文件随其嵌套 jar 走 jarJar, 不经这里。
     mergeServiceFiles()
     duplicatesStrategy = DuplicatesStrategy.INCLUDE
 
@@ -195,8 +214,18 @@ reobf {
     shadowJar {}
 }
 
-tasks.named('assemble').configure {
+// 对外产物: 取已 reobf 的 shadow 中间件内容, 再由 jarJar 追加 META-INF/jarjar 下的嵌套 sqlite。
+// 这样单一 jar 同时具备 relocate 后的 Jetty 与作为独立模块加载的 sqlite。
+// 内容全部来自已 reobf 的中间件, 故本任务产物无需再 reobf。
+tasks.named('jarJar').configure {
+    archiveClassifier = ''
     dependsOn tasks.named('reobfShadowJar')
+    from(zipTree(tasks.shadowJar.archiveFile))
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+tasks.named('assemble').configure {
+    dependsOn tasks.named('jarJar')
 }
 
 publishing {
