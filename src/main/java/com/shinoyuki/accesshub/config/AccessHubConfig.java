@@ -109,6 +109,14 @@ public interface AccessHubConfig {
     int getTabListLatencyYellow();
     int getTabListBroadcastIntervalTicks();
 
+    // 主动延迟探针 (Ping/Pong 高频测量, 取代原版 keep-alive 的 15 秒采样 + 重度平滑)
+    boolean isLatencyProbeEnabled();
+    int getLatencyProbeIntervalTicks();
+    int getLatencyProbeJitterTicks();
+    int getLatencyWindowSamples();
+    int getLatencyPublishIntervalTicks();
+    int getLatencyPublishHysteresisMs();
+
     // 日志
     boolean isLogRequests();
     boolean isDebug();

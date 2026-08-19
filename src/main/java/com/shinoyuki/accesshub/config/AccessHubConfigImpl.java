@@ -58,6 +58,7 @@ public final class AccessHubConfigImpl implements AccessHubConfig {
 
         ensurePackDefaults();
         ensureTabListDefaults();
+        ensureLatencyDefaults();
         ensureSecrets();
     }
 
@@ -265,6 +266,32 @@ public final class AccessHubConfigImpl implements AccessHubConfig {
         }
     }
 
+    /**
+     * 主动延迟探针的默认值。
+     *
+     * 默认 4 tick 一探 (5Hz) + 16 样本窗口 = 约 3.2 秒的观测窗, 这是"快"与"稳"的折中:
+     * 原版客户端回 pong 要等下一帧, 那份正向噪声靠窗口取 min 摊薄, 样本越多残差越小 (期望 T/(N+1)),
+     * 但窗口越长, 真值上升时靠样本滑出来跟随就越慢 —— 后者由跳变检测兜底, 故窗口可以取得较长。
+     */
+    private void ensureLatencyDefaults() {
+        boolean changed = false;
+        changed |= ensureSetting("latency.probe-enabled", true,
+                " 主动延迟探针总开关；关闭后延迟回落到原版 keep-alive 口径 (15 秒采样, 约 120 秒才收敛)");
+        changed |= ensureSetting("latency.probe-interval-ticks", 4,
+                " 两次探测之间的服务端 tick 数, 4 = 每秒 5 次；每玩家每秒双向约 100 字节");
+        changed |= ensureSetting("latency.probe-jitter-ticks", 1,
+                " 探测间隔的随机抖动 tick 数, 防止与客户端帧周期相位锁定导致排队偏差滤不掉；0 为关闭");
+        changed |= ensureSetting("latency.window-samples", 16,
+                " 取最小值的滑动窗口样本数；调大更稳更准, 调小对延迟上升的跟随更快");
+        changed |= ensureSetting("latency.publish-interval-ticks", 20,
+                " 两次延迟下发之间的 tick 数, 20 = 每秒 1 次；探测频率与下发频率解耦, 调大只影响显示刷新");
+        changed |= ensureSetting("latency.publish-hysteresis-ms", 3,
+                " 估计值变化小于该毫秒数 (或小于当前值的 10%) 时不下发, 避免数字抖动引发全服广播");
+        if (changed) {
+            config.save();
+        }
+    }
+
     private void ensureSecrets() {
         if (getAdminPassword().isEmpty()) {
             String pwd = generateRandomString(12, CHARSET_ALPHANUMERIC);
@@ -433,6 +460,13 @@ public final class AccessHubConfigImpl implements AccessHubConfig {
     @Override public int     getTabListLatencyGreen()          { return config.getIntOrElse("tablist.latency-green-threshold", 60); }
     @Override public int     getTabListLatencyYellow()         { return config.getIntOrElse("tablist.latency-yellow-threshold", 120); }
     @Override public int     getTabListBroadcastIntervalTicks(){ return config.getIntOrElse("tablist.broadcast-interval-ticks", 10); }
+
+    @Override public boolean isLatencyProbeEnabled()          { return config.getOrElse("latency.probe-enabled", true); }
+    @Override public int     getLatencyProbeIntervalTicks()   { return config.getIntOrElse("latency.probe-interval-ticks", 4); }
+    @Override public int     getLatencyProbeJitterTicks()     { return config.getIntOrElse("latency.probe-jitter-ticks", 1); }
+    @Override public int     getLatencyWindowSamples()        { return config.getIntOrElse("latency.window-samples", 16); }
+    @Override public int     getLatencyPublishIntervalTicks() { return config.getIntOrElse("latency.publish-interval-ticks", 20); }
+    @Override public int     getLatencyPublishHysteresisMs()  { return config.getIntOrElse("latency.publish-hysteresis-ms", 3); }
 
     @Override public boolean isLogRequests() { return config.getOrElse("logging.log-requests", false); }
     @Override public boolean isDebug()       { return config.getOrElse("logging.debug", false); }

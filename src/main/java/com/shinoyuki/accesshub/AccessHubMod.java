@@ -48,6 +48,7 @@ import com.shinoyuki.accesshub.api.NetworkInfoHandler;
 import com.shinoyuki.accesshub.api.NetworkInfoHandlerImpl;
 import com.shinoyuki.accesshub.event.NodeSessionListener;
 import com.shinoyuki.accesshub.http.HttpServer;
+import com.shinoyuki.accesshub.latency.LatencyProbeService;
 import com.shinoyuki.accesshub.net.NodeDefinition;
 import com.shinoyuki.accesshub.net.NodeRelayServer;
 import com.shinoyuki.accesshub.net.NodeSessionRegistry;
@@ -266,6 +267,12 @@ public final class AccessHubMod {
         // 这样 /accesshub reload 改开关后无需重启即可生效.
         MinecraftForge.EVENT_BUS.register(new TabListService(config, server));
         LOGGER.info("Tab 列表增强已注册到事件总线 (tablist.enabled={})", config.isTabListEnabled());
+
+        // 12. 主动延迟探针. 与上面同样常驻注册, 内部先判 latency.probe-enabled。
+        // 探针把估计写回 ServerPlayer.latency, 因此 Tab 显示、原版信号格图标与 HTTP API
+        // 三个消费方共用同一个真值, 都不需要为此改造。
+        MinecraftForge.EVENT_BUS.register(new LatencyProbeService(config, server));
+        LOGGER.info("主动延迟探针已注册到事件总线 (latency.probe-enabled={})", config.isLatencyProbeEnabled());
     }
 
     /**
