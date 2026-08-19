@@ -173,11 +173,11 @@ tasks.named('jar', Jar).configure {
     }
 }
 
-// fat jar: 合并 shade 依赖 + mod 类。它是【中间件】而非对外产物 ——
-// sqlite 必须以嵌套 jar 的形态存在 (独立 JPMS 模块), 而 shadow 的既定行为是把遇到的 jar 一律展开合并,
-// 无法在同一个任务里既 relocate Jetty 又保住嵌套结构。故由下方 jarJar 任务基于本产物再封一层。
+// fat jar: 合并 shade 依赖 + mod 类。archiveClassifier='' 使其成为主产物 shinoyuki_accesshub-<ver>.jar。
+// 注意本任务【不含】sqlite: 它必须以嵌套 jar 形态作为独立 JPMS 模块存在, 由下方 reobfShadowJar
+// 的 doLast 在 reobf 完成后以纯文件方式追加。
 tasks.named('shadowJar', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar).configure {
-    archiveClassifier = 'shaded'
+    archiveClassifier = ''
     configurations = [project.configurations.shade]
 
     // 只 relocate Jetty: 自包含、避免与其它 mod 的 HTTP 栈冲突。
@@ -214,18 +214,35 @@ reobf {
     shadowJar {}
 }
 
-// 对外产物: 取已 reobf 的 shadow 中间件内容, 再由 jarJar 追加 META-INF/jarjar 下的嵌套 sqlite。
-// 这样单一 jar 同时具备 relocate 后的 Jetty 与作为独立模块加载的 sqlite。
-// 内容全部来自已 reobf 的中间件, 故本任务产物无需再 reobf。
+// jarJar 任务仅用于产出嵌套件与 metadata.json, 不作为对外产物 —— 它的 CopySpec 固定带上
+// sourceSets 输出, 那是【未经 relocate】的原始类, 与 shade 后的 Jetty 放在一起会让
+// AccessHubMod 去找 org.eclipse.jetty.* 而非 com.shinoyuki.accesshub.libs.jetty.*
+// (实测 NoClassDefFoundError: org/eclipse/jetty/util/thread/ThreadPool)。
 tasks.named('jarJar').configure {
-    archiveClassifier = ''
-    dependsOn tasks.named('reobfShadowJar')
-    from(zipTree(tasks.shadowJar.archiveFile))
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    archiveClassifier = 'jarjaronly'
+}
+
+// 嵌套件在 reobf 之后以【纯文件】方式追加进对外产物: shadow 的既定行为是把经其 CopySpec 的 jar
+// 一律展开合并 (实测嵌套 sqlite 被摊平成 187 个 org/sqlite 类), 而 ant.zip 只做字节级追加,
+// 嵌套结构得以保住。放在 reobf 之后是因为 reobf 会解包重打, 先追加则嵌套件可能在重打时丢失。
+tasks.named('reobfShadowJar').configure {
+    dependsOn tasks.named('jarJar')
+    doLast {
+        def staging = layout.buildDirectory.dir('jarjar-staging').get().asFile
+        project.delete(staging)
+        project.copy {
+            from project.zipTree(tasks.jarJar.archiveFile)
+            include 'META-INF/jarjar/**'
+            into staging
+        }
+        ant.zip(destfile: tasks.shadowJar.archiveFile.get().asFile, update: true) {
+            fileset(dir: staging)
+        }
+    }
 }
 
 tasks.named('assemble').configure {
-    dependsOn tasks.named('jarJar')
+    dependsOn tasks.named('reobfShadowJar')
 }
 
 publishing {
