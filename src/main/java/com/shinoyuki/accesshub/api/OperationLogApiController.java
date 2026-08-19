@@ -66,7 +66,7 @@ public class OperationLogApiController {
      * 处理GET /api/v1/logs/operations - 查询操作日志
      * 
      * 查询参数:
-     * - type: 操作类型(实际写入的有 ADD/REMOVE/SET_ACTIVE/GENCODE)
+     * - type: 操作类型(实际写入的有 ADD/REMOVE/SET_ACTIVE/GENCODE/RESET_AUTH)
      * - target_uuid: 目标玩家UUID
      * - target_name: 目标玩家名称
      * - operator_ip: 操作者IP

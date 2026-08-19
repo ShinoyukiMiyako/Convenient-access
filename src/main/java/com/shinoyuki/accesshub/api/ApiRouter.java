@@ -491,6 +491,13 @@ public class ApiRouter extends HttpServlet {
                      whitelistController.handleIssueRegistrationCode(request, response);
                  } else if (path.equals("/api/v1/whitelist/sync")) {
                      whitelistController.handleTriggerSync(request, response);
+                 }
+                 // 重置玩家密码与免密状态: POST /api/v1/whitelist/by-name/{name}/reset-auth
+                 // 走 POST 而非 DELETE, 因 DELETE 分支按前缀截玩家名, 会把子路径一起吞掉
+                 else if (path.startsWith("/api/v1/whitelist/by-name/") && path.endsWith("/reset-auth")) {
+                     String name = path.substring("/api/v1/whitelist/by-name/".length(),
+                             path.length() - "/reset-auth".length());
+                     whitelistController.handleResetPlayerAuth(request, response, name);
                  } else {
                      send404Response(response, "Endpoint not found");
                  }

@@ -2,6 +2,7 @@ package com.shinoyuki.accesshub.deviceauth;
 
 import java.security.PublicKey;
 import java.security.SecureRandom;
+import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -113,6 +114,21 @@ public final class DeviceAuthServer {
     /** 玩家退出: 清理握手会话。 */
     public void clear(UUID uuid) {
         sessions.remove(uuid);
+    }
+
+    /**
+     * 管理侧吊销该用户名的设备绑定: 删掉服务端存的公钥, 该玩家须重新 /enroll 才能恢复免密。
+     *
+     * DB 阻塞, 调用方须置于异步线程。与本模块其余路径的 fail-closed 静默回退不同,
+     * 这里异常必须上抛 —— 管理员点了重置却因写库失败留着旧绑定, 不告知就是留后门。
+     */
+    public boolean revokeDevice(String username) {
+        try {
+            return deviceKeyDao.delete(username);
+        } catch (SQLException e) {
+            logger.error("[免密] 吊销设备绑定失败: {}", username, e);
+            throw new IllegalStateException("吊销设备绑定失败", e);
+        }
     }
 
     /**

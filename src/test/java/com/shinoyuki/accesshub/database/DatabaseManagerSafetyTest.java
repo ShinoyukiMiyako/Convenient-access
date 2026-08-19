@@ -51,7 +51,7 @@ class DatabaseManagerSafetyTest {
             assertTrue(retryManager.initialize().get(), "移除外部冲突后迁移应能从 v5 完整重试");
             try (Connection connection = retryManager.getConnection();
                  Statement statement = connection.createStatement()) {
-                assertEquals(9, scalar(statement, "SELECT MAX(version) FROM database_version"));
+                assertEquals(10, scalar(statement, "SELECT MAX(version) FROM database_version"));
                 assertEquals(1, scalar(statement,
                         "SELECT COUNT(*) FROM pragma_table_info('whitelist') WHERE name='qq'"));
                 assertEquals(1, scalar(statement,
@@ -116,7 +116,7 @@ class DatabaseManagerSafetyTest {
             try (Connection connection = manager.getConnection();
                  Statement statement = connection.createStatement()) {
                 assertEquals(1, scalar(statement, "SELECT COUNT(*) FROM database_version"));
-                assertEquals(9, scalar(statement, "SELECT MAX(version) FROM database_version"));
+                assertEquals(10, scalar(statement, "SELECT MAX(version) FROM database_version"));
             }
         } finally {
             callers.shutdownNow();

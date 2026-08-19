@@ -129,6 +129,7 @@ HTTP 状态码 401。
 | `/api/v1/whitelist/sync` | POST | 兼容桩，JSON 同步已移除 | X-API-Key 或 JWT |
 | `/api/v1/whitelist/sync/status` | GET | 兼容桩，返回纯数据库模式标记 | X-API-Key 或 JWT |
 | `/api/v1/whitelist/by-name/{name}/status` | PUT | 启用/禁用指定玩家的白名单访问权限 | X-API-Key 或 JWT |
+| `/api/v1/whitelist/by-name/{name}/reset-auth` | POST | 重置指定玩家的密码与免密状态 | X-API-Key 或 JWT |
 | `/api/v1/whitelist/by-name/{name}` | DELETE | 按玩家名删除白名单条目 | X-API-Key 或 JWT |
 | `/api/v1/whitelist/{uuid}` | DELETE | 按 UUID 删除白名单条目 | X-API-Key 或 JWT |
 
@@ -420,6 +421,40 @@ HTTP 状态码 401。
 ```
 
 **错误：** 玩家名非法或缺少 `is_active` 返回 400；玩家不存在返回 404。
+
+### `POST /api/v1/whitelist/by-name/{name}/reset-auth`
+
+重置指定玩家的登录凭据：删除其密码记录，并吊销已登记的设备免密绑定（`device_keys` 中的公钥）。玩家此后须重新 `/register` 设置密码，并重新 `/enroll` 才能恢复免密登录。
+
+两者必须一起清：只删密码而保留设备公钥，玩家用原客户端进服仍会被免密验签自动解冻，重置形同虚设。
+
+该玩家若正在线上，会被**原地降级为未认证**——冻结在当前位置、收到重置提示，并重新起算 `auth.timeout-seconds` 登录超时窗口，而非直接踢下线。
+
+**白名单条目本身不受影响**：玩家仍在白名单中，`is_active` 不变。这与 `DELETE`（移出白名单）和 `PUT .../status`（关停访问权限）是三件不同的事。
+
+用 POST 而非 DELETE，是因为 DELETE 路由按前缀截取玩家名，会把 `{name}/reset-auth` 整段当成玩家名。
+
+`{name}` 需做 URL 编码。无请求体。
+
+**响应示例：**
+
+```json
+{
+  "success": true,
+  "data": {
+    "name": "PlayerName",
+    "password_cleared": true,
+    "device_revoked": false
+  },
+  "message": "已重置该玩家的密码与免密状态",
+  "code": 200,
+  "timestamp": "2026-08-19T10:12:33.421"
+}
+```
+
+`password_cleared` 与 `device_revoked` 分别表示本次实际清掉了什么；玩家没登记过免密时 `device_revoked` 为 `false`，属正常情况。
+
+**错误：** 玩家名非法 400；该玩家没有任何认证记录（两项皆无可清）404；玩家认证系统未就绪 503。
 
 ### `POST /api/v1/whitelist/batch`
 

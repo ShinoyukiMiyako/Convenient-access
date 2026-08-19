@@ -51,7 +51,7 @@ public class DatabaseManager {
     private CompletableFuture<Boolean> initializationFuture;
 
     // 数据库版本
-    private static final int CURRENT_VERSION = 9; // v9: 新增整合包版本与文件条目
+    private static final int CURRENT_VERSION = 10; // v10: operation_log 放行 RESET_AUTH
 
     public DatabaseManager(File dataFolder) {
         this.dataFolder = dataFolder;

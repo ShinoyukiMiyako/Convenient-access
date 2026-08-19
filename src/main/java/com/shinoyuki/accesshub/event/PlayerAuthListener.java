@@ -146,6 +146,18 @@ public final class PlayerAuthListener {
         }
     }
 
+    /**
+     * 管理员重置在线玩家认证后调用: 丢弃其锚点与超时计时。
+     *
+     * 不在这里重新登记, 是因为 onPlayerTick 已有惰性补登记 —— 下一 tick 它会以玩家当前坐标建锚点、
+     * 以当前时刻起算超时。若沿用进服时写下的 joinedAt, 玩家在线超过 auth.timeout-seconds 后被重置
+     * 就会立刻判超时踢下线, 与"原地降级为未认证、给完整时间重新 /register"的预期相悖。
+     */
+    public void onAdminReset(UUID uuid) {
+        anchors.remove(uuid);
+        joinedAt.remove(uuid);
+    }
+
     /** 退服: 清理会话与计时, 防止 UUID 残留已认证状态。 */
     @SubscribeEvent
     public void onPlayerLoggedOut(PlayerEvent.PlayerLoggedOutEvent event) {

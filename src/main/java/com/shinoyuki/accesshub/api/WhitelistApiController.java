@@ -19,6 +19,7 @@ import com.google.gson.TypeAdapter;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
 import com.shinoyuki.accesshub.auth.AdminUser;
+import com.shinoyuki.accesshub.auth.PlayerAuthAdminService;
 import com.shinoyuki.accesshub.auth.PlayerAuthService;
 import com.shinoyuki.accesshub.config.AccessHubConfig;
 import com.shinoyuki.accesshub.operation.OperationLogDao;
@@ -40,14 +41,17 @@ public class WhitelistApiController {
     private final WhitelistManager whitelistManager;
     private final OperationLogDao operationLogDao;
     private final PlayerAuthService playerAuthService; // 加白成功后签发绑定注册码; 可为 null (认证未启用)
+    private final PlayerAuthAdminService playerAuthAdminService; // 重置认证; 可为 null (mod 启动失败)
     private final AccessHubConfig config;
     private final Gson gson;
 
     public WhitelistApiController(WhitelistManager whitelistManager, OperationLogDao operationLogDao,
-                                  PlayerAuthService playerAuthService, AccessHubConfig config) {
+                                  PlayerAuthService playerAuthService,
+                                  PlayerAuthAdminService playerAuthAdminService, AccessHubConfig config) {
         this.whitelistManager = whitelistManager;
         this.operationLogDao = operationLogDao;
         this.playerAuthService = playerAuthService;
+        this.playerAuthAdminService = playerAuthAdminService;
         this.config = config;
         // 配置Gson以正确处理LocalDateTime
         this.gson = new GsonBuilder()
@@ -494,6 +498,61 @@ public class WhitelistApiController {
             logger.error("处理设置启用状态请求失败", e);
             sendJsonResponse(response, 500, ApiResponse.error("服务器内部错误"));
             logOperation("SET_ACTIVE", null, null, request, requestBody, 500, System.currentTimeMillis() - startTime);
+        }
+    }
+
+    /**
+     * 处理 POST /api/v1/whitelist/by-name/{name}/reset-auth - 重置该玩家的密码与免密状态。
+     *
+     * 清掉密码记录并吊销设备绑定; 在线的同名玩家原地降级为未认证。玩家此后须重新 /register,
+     * 并重新 /enroll 才能恢复免密。
+     *
+     * 用 POST 而非 DELETE: DELETE 分支按 startsWith("/by-name/") 截取玩家名, 会把 "{name}/reset-auth"
+     * 整段当成玩家名, 落到删除白名单的处理器上。
+     */
+    public void handleResetPlayerAuth(HttpServletRequest request, HttpServletResponse response,
+                                      String playerName) throws IOException {
+        long startTime = System.currentTimeMillis();
+        try {
+            final String name = java.net.URLDecoder.decode(playerName, "UTF-8");
+            if (!isValidPlayerName(name)) {
+                sendJsonResponse(response, 400, ApiResponse.badRequest("玩家名称格式无效: " + name));
+                logOperation("RESET_AUTH", null, name, request, null, 400, System.currentTimeMillis() - startTime);
+                return;
+            }
+            if (playerAuthAdminService == null) {
+                sendJsonResponse(response, 503, ApiResponse.error("玩家认证系统未就绪"));
+                logOperation("RESET_AUTH", null, name, request, null, 503, System.currentTimeMillis() - startTime);
+                return;
+            }
+
+            playerAuthAdminService.reset(name)
+                .thenAccept(outcome -> {
+                    long executionTime = System.currentTimeMillis() - startTime;
+                    if (!outcome.isAnythingCleared()) {
+                        sendJsonResponse(response, 404, ApiResponse.notFound("该玩家没有认证记录"));
+                        logOperation("RESET_AUTH", null, name, request, null, 404, executionTime);
+                        return;
+                    }
+                    JsonObject result = new JsonObject();
+                    result.addProperty("name", name);
+                    result.addProperty("password_cleared", outcome.isPasswordCleared());
+                    result.addProperty("device_revoked", outcome.isDeviceRevoked());
+                    sendJsonResponse(response, 200, ApiResponse.success(result, "已重置该玩家的密码与免密状态"));
+                    logOperation("RESET_AUTH", null, name, request, null, 200, executionTime);
+                })
+                .exceptionally(throwable -> {
+                    logger.error("重置玩家认证失败: {}", name, throwable);
+                    sendJsonResponse(response, 500, ApiResponse.error("重置玩家认证失败"));
+                    logOperation("RESET_AUTH", null, name, request, null, 500, System.currentTimeMillis() - startTime);
+                    return null;
+                })
+                .join();
+
+        } catch (Exception e) {
+            logger.error("处理重置玩家认证请求失败", e);
+            sendJsonResponse(response, 500, ApiResponse.error("服务器内部错误"));
+            logOperation("RESET_AUTH", null, null, request, null, 500, System.currentTimeMillis() - startTime);
         }
     }
 

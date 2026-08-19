@@ -30,7 +30,7 @@ public class OperationLogDao {
      * 记录操作日志
      * @param operationType 操作类型。必须在 operation_log 的 chk_operation_type 白名单内,
      *                      否则 INSERT 被拒、本方法返回 false (调用方务必检查返回值)。
-     *                      代码实际写入的有 ADD / REMOVE / SET_ACTIVE / GENCODE / UNAUTHORIZED_ACCESS
+     *                      代码实际写入的有 ADD / REMOVE / SET_ACTIVE / GENCODE / RESET_AUTH / UNAUTHORIZED_ACCESS
      * @param targetUuid 目标玩家UUID
      * @param targetName 目标玩家名称
      * @param operatorIp 操作者IP

@@ -26,6 +26,7 @@ import com.shinoyuki.accesshub.integration.SparkIntegration;
 import com.shinoyuki.accesshub.api.WhitelistApiController;
 import com.shinoyuki.accesshub.auth.AdminAuthService;
 import com.shinoyuki.accesshub.auth.LoginAttemptService;
+import com.shinoyuki.accesshub.auth.PlayerAuthAdminService;
 import com.shinoyuki.accesshub.auth.PlayerAuthDao;
 import com.shinoyuki.accesshub.auth.PlayerAuthService;
 import com.shinoyuki.accesshub.auth.PersonalCodeManager;
@@ -86,6 +87,7 @@ public final class AccessHubMod {
     private WhitelistManager whitelistManager;
     private AdminAuthService adminAuthService;
     private PlayerAuthService playerAuthService;
+    private PlayerAuthAdminService playerAuthAdminService;
     private DeviceAuthServer deviceAuthServer;
     private HttpServer httpServer;
     private PackUploadController packUploadController;
@@ -193,9 +195,15 @@ public final class AccessHubMod {
         deviceAuthServer = new DeviceAuthServer(deviceKeyDao, playerAuthService, config);
         AuthChannel.setServer(deviceAuthServer);
 
+        // 认证拦截器在此构建, 注册到 EVENT_BUS 见步骤 8b: 管理侧重置须经它重置未认证超时计时,
+        // 故必须早于下面的 API Controller 装配。
+        PlayerAuthListener authListener = new PlayerAuthListener(config, playerAuthService, deviceAuthServer);
+        // 重置玩家认证 (清密码 + 吊销免密) 的唯一实现, HTTP 端点与游戏内命令共用
+        playerAuthAdminService = new PlayerAuthAdminService(server, playerAuthService, deviceAuthServer, authListener);
+
         // 6. API Controllers (加白时由 playerAuthService 签发绑定注册码并回传)
         WhitelistApiController whitelistController = new WhitelistApiController(
-                whitelistManager, operationLogDao, playerAuthService, config);
+                whitelistManager, operationLogDao, playerAuthService, playerAuthAdminService, config);
         UserApiController userController = new UserApiController(tokenManager, whitelistManager);
         OperationLogApiController operationLogController = new OperationLogApiController(operationLogDao);
         AdminAuthController adminAuthController = new AdminAuthController(adminAuthService);
@@ -250,9 +258,8 @@ public final class AccessHubMod {
         // 8a. 线路归属认领器. 独立于白名单开关, 故单独注册.
         MinecraftForge.EVENT_BUS.register(new NodeSessionListener(nodeSessionRegistry));
 
-        // 8b. 玩家离线认证拦截器 (未认证全限制 + 冻结 + 超时踢出).
+        // 8b. 玩家离线认证拦截器 (未认证全限制 + 冻结 + 超时踢出). 实例已在步骤 5 建好.
         // 注册到 EVENT_BUS 即生效; 内部各 @SubscribeEvent 均先判 auth.enabled 再处理, 禁用时零开销放行.
-        PlayerAuthListener authListener = new PlayerAuthListener(config, playerAuthService, deviceAuthServer);
         MinecraftForge.EVENT_BUS.register(authListener);
         LOGGER.info("玩家离线认证拦截器已注册到事件总线 (auth.enabled={})", config.isPlayerAuthEnabled());
 
@@ -398,5 +405,10 @@ public final class AccessHubMod {
     /** 暴露给命令层 (/enroll) 与网络通道使用. mod 启动失败时返回 null. */
     public DeviceAuthServer getDeviceAuthServer() {
         return deviceAuthServer;
+    }
+
+    /** 暴露给命令层 (auth reset). 与 HTTP 端点共用同一实例, 保证两个入口重置语义一致. */
+    public PlayerAuthAdminService getPlayerAuthAdminService() {
+        return playerAuthAdminService;
     }
 }

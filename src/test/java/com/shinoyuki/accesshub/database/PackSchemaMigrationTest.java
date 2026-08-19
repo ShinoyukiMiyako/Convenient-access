@@ -33,6 +33,22 @@ class PackSchemaMigrationTest {
              Statement statement = connection.createStatement()) {
             statement.execute("CREATE TABLE database_version (version INTEGER PRIMARY KEY)");
             statement.execute("INSERT INTO database_version (version) VALUES (8)");
+            // 真实 v8 库自 v1 起就有 operation_log, 且 v7 已把它重建成含 SET_ACTIVE/GENCODE 的形态。
+            // 9->10 要再次重建该表以放行 RESET_AUTH, 夹具缺表会让迁移失败在与 pack schema 无关的地方。
+            statement.execute("CREATE TABLE operation_log ("
+                    + "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                    + "operation_type VARCHAR(20) NOT NULL,"
+                    + "target_uuid VARCHAR(36),"
+                    + "target_name VARCHAR(16),"
+                    + "operator_ip VARCHAR(45),"
+                    + "operator_agent TEXT,"
+                    + "request_data TEXT,"
+                    + "response_status INTEGER,"
+                    + "execution_time INTEGER,"
+                    + "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
+                    + "CONSTRAINT chk_operation_type CHECK (operation_type IN "
+                    + "('ADD','REMOVE','QUERY','BATCH_ADD','BATCH_REMOVE','SYNC',"
+                    + "'UNAUTHORIZED_ACCESS','SET_ACTIVE','GENCODE')))");
         }
 
         DatabaseManager fresh = new DatabaseManager(freshFolder);
@@ -40,7 +56,7 @@ class PackSchemaMigrationTest {
         try {
             assertTrue(fresh.initialize().get(), "新库初始化应成功");
             assertTrue(migrated.initialize().get(), "v8 数据库迁移应成功");
-            assertEquals(9, databaseVersion(migrated));
+            assertEquals(10, databaseVersion(migrated));
             assertEquals(packSchema(fresh), packSchema(migrated),
                     "新库 schema 与 8->9 迁移结果必须完全一致");
             assertEquals(packTableMetadata(fresh, "pack_version"),

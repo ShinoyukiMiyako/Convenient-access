@@ -24,7 +24,7 @@ import org.junit.jupiter.api.io.TempDir;
  */
 class DatabaseVersionMigrationTest {
 
-    private static final int CURRENT_VERSION = 9;
+    private static final int CURRENT_VERSION = 10;
 
     @TempDir
     File tempDir;
@@ -71,6 +71,22 @@ class DatabaseVersionMigrationTest {
         }
     }
 
+    /**
+     * operation_log 的 CHECK 是否放行该操作类型。
+     * DAO 把 SQLException 吞成 false, 漏配的类型只会静默丢日志而不报错, 故只能在此直接探测。
+     */
+    private boolean operationTypeAccepted(DatabaseManager db, String type) throws SQLException {
+        try (Connection c = db.getConnection();
+             PreparedStatement ps = c.prepareStatement(
+                     "INSERT INTO operation_log (operation_type, target_name) VALUES (?, 'probe')")) {
+            ps.setString(1, type);
+            ps.executeUpdate();
+            return true;
+        } catch (SQLException e) {
+            return false;
+        }
+    }
+
     @Test
     void freshDbInitializesToSingleRowCurrentVersion() throws Exception {
         DatabaseManager db = new DatabaseManager(tempDir);
@@ -83,6 +99,8 @@ class DatabaseVersionMigrationTest {
         assertTrue(tableExists(db, "admin_qq_bindings"), "新库应建出 QQ 绑定表");
         assertTrue(tableExists(db, "pack_version"), "新库应建出整合包版本表");
         assertTrue(tableExists(db, "pack_entry"), "新库应建出整合包条目表");
+        assertTrue(operationTypeAccepted(db, "RESET_AUTH"),
+                "新库 operation_log 应放行 RESET_AUTH, 否则重置玩家认证的审计会被 CHECK 静默拒收");
         db.shutdown();
     }
 
@@ -140,6 +158,8 @@ class DatabaseVersionMigrationTest {
             s.execute("INSERT INTO operation_log (operation_type, target_name) VALUES ('SET_ACTIVE', 'x')");
             s.execute("INSERT INTO operation_log (operation_type, target_name) VALUES ('GENCODE', 'x')");
         }
+        // 9->10 放宽 CHECK: 老库一路升上来也必须能写 RESET_AUTH
+        assertTrue(operationTypeAccepted(db, "RESET_AUTH"), "9->10 迁移应放行 RESET_AUTH");
 
         db.shutdown();
     }

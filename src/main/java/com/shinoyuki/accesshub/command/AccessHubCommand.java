@@ -7,6 +7,7 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.tree.LiteralCommandNode;
 import com.shinoyuki.accesshub.AccessHubMod;
+import com.shinoyuki.accesshub.auth.PlayerAuthAdminService;
 import com.shinoyuki.accesshub.auth.PlayerAuthRecord;
 import com.shinoyuki.accesshub.auth.PlayerAuthService;
 import com.shinoyuki.accesshub.config.AccessHubConfig;
@@ -274,32 +275,32 @@ public final class AccessHubCommand {
     // ==================== 玩家认证管理子命令 ====================
     // 离线认证管理 (清密码 / 注销 / 查询). DB 操作阻塞, 放 supplyAsync 后回主线程发包。
 
-    /** auth reset / auth unregister: 删除玩家认证记录, 在线则踢出已认证会话强制重新认证。 */
+    /**
+     * auth reset / auth unregister: 清密码记录 + 吊销设备免密绑定, 在线则原地降级为未认证。
+     *
+     * 两件事都做才算重置: 曾经这里只删密码记录, 而 device_keys 里的公钥仍在, 玩家用原客户端进服
+     * 照样验签解冻, 重置等于没做。清库与在线降级统一由 PlayerAuthAdminService 承担, 与 HTTP 端点同源。
+     */
     private static int doAuthReset(CommandContext<CommandSourceStack> ctx, AccessHubMod mod) {
         CommandSourceStack src = ctx.getSource();
-        PlayerAuthService auth = mod.getPlayerAuthService();
-        if (auth == null) {
+        PlayerAuthAdminService admin = mod.getPlayerAuthAdminService();
+        if (admin == null) {
             src.sendFailure(Component.literal("玩家认证系统未就绪 (未启用或 mod 启动失败)"));
             return 0;
         }
         String name = StringArgumentType.getString(ctx, "player");
         MinecraftServer server = src.getServer();
-        CompletableFuture.supplyAsync(() -> auth.adminReset(name))
-                .thenAccept(removed -> server.execute(() -> {
-                    if (removed) {
-                        // 删除记录后, 在线同名玩家立即降级为未认证 (清会话, tick 冻结接管)
-                        ServerPlayer online = server.getPlayerList().getPlayerByName(name);
-                        if (online != null) {
-                            auth.clearSession(online.getUUID());
-                            online.sendSystemMessage(
-                                    Component.literal("§c你的账号已被管理员重置, 请重新 /register"));
-                        }
-                        src.sendSuccess(() -> Component.literal("已重置玩家认证: " + name)
-                                .withStyle(ChatFormatting.GREEN), true);
-                    } else {
+        admin.reset(name)
+                .thenAccept(outcome -> server.execute(() -> {
+                    if (!outcome.isAnythingCleared()) {
                         src.sendSuccess(() -> Component.literal(name + " 没有认证记录")
                                 .withStyle(ChatFormatting.YELLOW), false);
+                        return;
                     }
+                    src.sendSuccess(() -> Component.literal("已重置玩家认证: " + name
+                                    + " (密码记录" + (outcome.isPasswordCleared() ? "已清除" : "无")
+                                    + ", 免密登记" + (outcome.isDeviceRevoked() ? "已吊销" : "无") + ")")
+                            .withStyle(ChatFormatting.GREEN), true);
                 }))
                 .exceptionally(t -> {
                     reply(src, Component.literal("重置异常: " + t.getMessage()).withStyle(ChatFormatting.RED));

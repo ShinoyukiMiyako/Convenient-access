@@ -15,5 +15,5 @@ CREATE TABLE IF NOT EXISTS operation_log (
     -- SQLException 记成日志并返回 false, 该类日志会被静默丢弃 (SET_ACTIVE/GENCODE 曾如此)。
     CONSTRAINT chk_operation_type CHECK (operation_type IN
         ('ADD', 'REMOVE', 'QUERY', 'BATCH_ADD', 'BATCH_REMOVE', 'SYNC',
-         'UNAUTHORIZED_ACCESS', 'SET_ACTIVE', 'GENCODE'))
+         'UNAUTHORIZED_ACCESS', 'SET_ACTIVE', 'GENCODE', 'RESET_AUTH'))
 );
