@@ -55,6 +55,7 @@ import com.shinoyuki.accesshub.net.NodeRelayServer;
 import com.shinoyuki.accesshub.net.NodeSessionRegistry;
 import com.shinoyuki.accesshub.net.ProbeServer;
 import com.shinoyuki.accesshub.operation.OperationLogDao;
+import com.shinoyuki.accesshub.pack.PackDownloadMirrors;
 import com.shinoyuki.accesshub.pack.PackAdminService;
 import com.shinoyuki.accesshub.pack.PackDao;
 import com.shinoyuki.accesshub.pack.PackVersionGate;
@@ -217,7 +218,9 @@ public final class AccessHubMod {
         ChatBridgeHandler chatBridgeHandler = new ChatBridgeHandlerImpl(server);
         BindingApiController bindingController = new BindingApiController(personalCodeManager, qqBindingDao);
         PackPublicApiHandler packPublicApiHandler =
-                new PackPublicApiHandlerImpl(new PackPublicService(packDao));
+                new PackPublicApiHandlerImpl(new PackPublicService(packDao,
+                        PackDownloadMirrors.from(config.getPackOssPublicBaseUrl(),
+                                config.getPackOssEndpoint(), config.getPackOssBucket())));
         PackAdminApiController packAdminController = new PackAdminApiController(packAdminService);
         Path uploadTempDirectory = baseDir.resolve("upload-tmp");
         packUploadController = new PackUploadController(packAdminService, config, uploadTempDirectory);

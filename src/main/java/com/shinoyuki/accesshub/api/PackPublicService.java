@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
+import com.shinoyuki.accesshub.pack.PackDownloadMirrors;
 import com.shinoyuki.accesshub.pack.PackEntry;
 import com.shinoyuki.accesshub.pack.PackEntryValidator;
 import com.shinoyuki.accesshub.pack.PackManifestRepository;
@@ -29,9 +30,16 @@ public final class PackPublicService {
     private static final String MANIFEST_ROOT = "https://api.mcwok.cn/api/v1/pack/manifest/";
 
     private final PackManifestRepository repository;
+    private final PackDownloadMirrors mirrors;
 
+    /** 不带兜底源：每条只发布入库的那一个地址。 */
     public PackPublicService(PackManifestRepository repository) {
+        this(repository, PackDownloadMirrors.disabled());
+    }
+
+    public PackPublicService(PackManifestRepository repository, PackDownloadMirrors mirrors) {
         this.repository = java.util.Objects.requireNonNull(repository, "repository");
+        this.mirrors = java.util.Objects.requireNonNull(mirrors, "mirrors");
     }
 
     public Optional<PackLatestResponse> getLatest() throws SQLException {
@@ -104,7 +112,7 @@ public final class PackPublicService {
                     sha1,
                     size,
                     entry.policy().databaseValue(),
-                    List.of(downloadUrl)));
+                    mirrors.expand(downloadUrl)));
         }
 
         return Optional.of(new PackManifestResponse(

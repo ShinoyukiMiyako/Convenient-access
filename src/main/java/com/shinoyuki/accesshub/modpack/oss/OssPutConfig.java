@@ -114,7 +114,14 @@ public final class OssPutConfig {
         return URI.create(prefix + objectKey);
     }
 
-    private static URI resolveBucketEndpoint(URI endpoint, String bucket) {
+    /**
+     * 由地域 Endpoint 与 bucket 拼出三级域名形式的访问地址。
+     *
+     * <p>公开是为了让清单侧（{@link com.shinoyuki.accesshub.pack.PackDownloadMirrors}）推导 OSS 直连
+     * 兜底地址时复用同一份拼装规则——那条路径不该为了拼个域名去构造需要 AccessKey 的完整配置，
+     * 更不该另写一份实现，两份规则一旦漂移，兜底地址就会静默指向不存在的主机。
+     */
+    public static URI resolveBucketEndpoint(URI endpoint, String bucket) {
         String host = endpoint.getHost();
         if (isLoopbackHost(host) || host.startsWith(bucket + ".")) {
             return endpoint;
