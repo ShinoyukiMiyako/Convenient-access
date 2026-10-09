@@ -1,10 +1,10 @@
 {
   "info": {
     "_postman_id": "ca-api-collection-2025",
-    "name": "ConvenientAccess API Complete",
-    "description": "ConvenientAccess 白名单管理系统 API 完整接口文档 v0.5.0\n\n基于 WhitelistPlus 设计理念，用于管理 Minecraft 服务器的白名单系统。\n\n## 认证方式\n\n### 1. API Token 认证（推荐）\n- 使用 `X-API-Key` 头\n- 或使用 `Authorization: Bearer <token>` 头\n\n### 2. 管理员密码认证\n- 使用 `X-Admin-Password` 头（主要用于生成注册令牌）\n\n### 3. JWT Token 认证\n- 登录后获取 JWT Token\n- 使用 `Authorization: Bearer <jwt-token>` 头\n\n## 公开端点（无需认证）\n- `/api/v1/admin/login` - 管理员登录\n- `/api/v1/admin/register` - 管理员注册（需要注册令牌）\n- `/api/v1/health` - 健康检查\n- `/api/v1/players/list` - 玩家列表\n- `/api/v1/worlds/list` - 世界列表\n- `/api/v1/system/resources` - 系统资源\n\n## 基础信息\n- 基础URL: `http://your-server:22222/api/v1`\n- 内容类型: `application/json`\n- 字符编码: `UTF-8`",
+    "name": "AccessHub API",
+    "description": "AccessHub (Forge mod shinoyuki_accesshub) HTTP API 请求集合, 对应 mod 版本 0.5.4。字段与错误码的完整说明见仓库根目录的 API.md。\n\n鉴权方式:\n- 集合级默认使用 X-API-Key 头, 值取自变量 api_token。\n- 标注\"只认 JWT\"的请求改用 Authorization: Bearer, 值取自变量 jwt_token。先执行\"管理员登录\", 脚本会自动填入该变量。\n- 公开端点不带任何凭据。\n\n使用前请设置变量 base_url 与 api_token。",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "version": "0.5.0"
+    "version": "0.5.4"
   },
   "auth": {
     "type": "apikey",
@@ -30,38 +30,63 @@
     {
       "key": "base_url",
       "value": "http://localhost:22222/api/v1",
-      "type": "string",
-      "description": "API 基础 URL"
+      "type": "string"
     },
     {
       "key": "api_token",
       "value": "sk-your-api-token-here",
-      "type": "string",
-      "description": "API Token (从服务器 config.yml 获取)"
-    },
-    {
-      "key": "admin_password",
-      "value": "your-admin-password",
-      "type": "string",
-      "description": "管理员密码（12位随机字符串）"
+      "type": "string"
     },
     {
       "key": "jwt_token",
       "value": "",
-      "type": "string",
-      "description": "JWT Token (登录后自动填充)"
+      "type": "string"
     },
     {
       "key": "registration_token",
       "value": "",
-      "type": "string",
-      "description": "注册令牌 (生成后自动填充)"
+      "type": "string"
+    },
+    {
+      "key": "player_name",
+      "value": "PlayerName",
+      "type": "string"
+    },
+    {
+      "key": "player_uuid",
+      "value": "550e8400-e29b-41d4-a716-446655440000",
+      "type": "string"
+    },
+    {
+      "key": "qq",
+      "value": "10001",
+      "type": "string"
+    },
+    {
+      "key": "pack_version",
+      "value": "1.0.0",
+      "type": "string"
+    },
+    {
+      "key": "pack_version_id",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "pack_entry_id",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "diff_revision",
+      "value": "",
+      "type": "string"
     }
   ],
   "item": [
     {
-      "name": "🔐 认证管理",
-      "description": "管理员登录、注册和令牌管理相关接口",
+      "name": "管理员认证",
+      "description": "登录与注册是公开端点; /admin/me 只认 JWT。",
       "item": [
         {
           "name": "管理员登录",
@@ -70,15 +95,10 @@
               "listen": "test",
               "script": {
                 "exec": [
-                  "var jsonData = pm.response.json();",
-                  "if (jsonData.success && jsonData.data && jsonData.data.token) {",
-                  "    pm.collectionVariables.set(\"jwt_token\", jsonData.data.token);",
-                  "    console.log(\"✅ JWT Token 已保存到变量\");",
-                  "}",
-                  "",
-                  "pm.test(\"登录成功\", function () {",
-                  "    pm.expect(jsonData.success).to.eql(true);",
-                  "});"
+                  "var body = pm.response.json();",
+                  "if (body.success && body.data && body.data.token) {",
+                  "    pm.collectionVariables.set(\"jwt_token\", body.data.token);",
+                  "}"
                 ],
                 "type": "text/javascript"
               }
@@ -106,38 +126,17 @@
             },
             "url": {
               "raw": "{{base_url}}/admin/login",
-              "host": ["{{base_url}}"],
-              "path": ["admin", "login"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "login"
+              ]
             },
-            "description": "管理员登录，返回 JWT Token。\n\n**🔓 此端点无需认证（公开端点）**\n\n登录成功后，JWT Token 会自动保存到 `jwt_token` 变量中，可用于后续需要 JWT 认证的请求。"
+            "description": "公开端点。返回 JWT, 有效期 24 小时。成功后脚本会把 token 存入集合变量 jwt_token。"
           },
-          "response": [
-            {
-              "name": "登录成功",
-              "originalRequest": {
-                "method": "POST",
-                "header": [
-                  {
-                    "key": "Content-Type",
-                    "value": "application/json"
-                  }
-                ],
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n  \"username\": \"admin\",\n  \"password\": \"your-password\"\n}"
-                },
-                "url": {
-                  "raw": "{{base_url}}/admin/login",
-                  "host": ["{{base_url}}"],
-                  "path": ["admin", "login"]
-                }
-              },
-              "status": "OK",
-              "code": 200,
-              "_postman_previewlanguage": "json",
-              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\",\n    \"username\": \"admin\",\n    \"expiresAt\": \"2024-01-02T12:00:00\"\n  },\n  \"message\": \"登录成功\",\n  \"timestamp\": 1640995200000\n}"
-            }
-          ]
+          "response": []
         },
         {
           "name": "管理员注册",
@@ -154,7 +153,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"token\": \"{{registration_token}}\",\n  \"username\": \"newadmin\",\n  \"password\": \"secure-password\"\n}",
+              "raw": "{\n  \"username\": \"newadmin\",\n  \"password\": \"your-password\",\n  \"token\": \"{{registration_token}}\",\n  \"displayName\": \"新管理员\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -163,15 +162,20 @@
             },
             "url": {
               "raw": "{{base_url}}/admin/register",
-              "host": ["{{base_url}}"],
-              "path": ["admin", "register"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "register"
+              ]
             },
-            "description": "使用注册令牌注册新管理员。\n\n**🔓 此端点无需 API Token 认证，但需要有效的注册令牌。**\n\n注册令牌可通过 `生成注册令牌` 接口获取。"
+            "description": "公开端点, 但请求体必须携带由 /admin/generate-token 签发的一次性注册令牌。"
           },
           "response": []
         },
         {
-          "name": "获取当前管理员信息",
+          "name": "当前管理员信息",
           "request": {
             "auth": {
               "type": "bearer",
@@ -187,24 +191,910 @@
             "header": [],
             "url": {
               "raw": "{{base_url}}/admin/me",
-              "host": ["{{base_url}}"],
-              "path": ["admin", "me"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "me"
+              ]
             },
-            "description": "获取当前已登录管理员的信息。\n\n**🔒 需要 JWT Token 认证**\n\n请先执行「管理员登录」获取 JWT Token。"
+            "description": "只认 JWT, 只带 X-API-Key 会返回 401。"
           },
           "response": []
         },
         {
-          "name": "生成注册令牌",
+          "name": "生成管理员注册令牌",
           "event": [
             {
               "listen": "test",
               "script": {
                 "exec": [
-                  "var jsonData = pm.response.json();",
-                  "if (jsonData.success && jsonData.data && jsonData.data.token) {",
-                  "    pm.collectionVariables.set(\"registration_token\", jsonData.data.token);",
-                  "    console.log(\"✅ 注册令牌已保存到变量\");",
+                  "var body = pm.response.json();",
+                  "if (body.success && body.data && body.data.token) {",
+                  "    pm.collectionVariables.set(\"registration_token\", body.data.token);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"expiryHours\": 24\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/admin/generate-token",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "generate-token"
+              ]
+            },
+            "description": "expiryHours 取 1-168, 缺省 24。成功后脚本会把令牌存入集合变量 registration_token。"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "白名单",
+      "description": "X-API-Key 或 JWT 均可。带 JWT 调用加白时, 添加者会被服务端强制记为该管理员。",
+      "item": [
+        {
+          "name": "白名单列表",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/whitelist?page=1&size=20&sort=created_at&order=desc",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "whitelist"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                },
+                {
+                  "key": "sort",
+                  "value": "created_at"
+                },
+                {
+                  "key": "order",
+                  "value": "desc"
+                }
+              ]
+            },
+            "description": "分页列表, 含被禁用条目。可选参数: search / source / added_by / start_date / end_date。"
+          },
+          "response": []
+        },
+        {
+          "name": "添加白名单 (最简)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{player_name}}\",\n  \"source\": \"ADMIN\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/whitelist",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "whitelist"
+              ]
+            },
+            "description": "name 须为 3-16 位字母数字下划线; source 只接受 PLAYER / ADMIN / SYSTEM。成功返回 HTTP 201。"
+          },
+          "response": []
+        },
+        {
+          "name": "添加白名单 (完整)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{player_name}}\",\n  \"source\": \"ADMIN\",\n  \"added_by_name\": \"AdminUser\",\n  \"added_by_uuid\": \"API\",\n  \"qq\": \"10001\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/whitelist",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "whitelist"
+              ]
+            },
+            "description": "added_by_uuid 兼作渠道标记。"
+          },
+          "response": []
+        },
+        {
+          "name": "按 UUID 删除",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/whitelist/{{player_uuid}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "whitelist",
+                "{{player_uuid}}"
+              ]
+            },
+            "description": "UUID 须为 36 位带连字符格式。"
+          },
+          "response": []
+        },
+        {
+          "name": "按玩家名删除",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/whitelist/by-name/{{player_name}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "whitelist",
+                "by-name",
+                "{{player_name}}"
+              ]
+            },
+            "description": "用于 UUID 尚未补充的条目。"
+          },
+          "response": []
+        },
+        {
+          "name": "启用或禁用",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"is_active\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/whitelist/by-name/{{player_name}}/status",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "whitelist",
+                "by-name",
+                "{{player_name}}",
+                "status"
+              ]
+            },
+            "description": "禁用后条目仍在白名单中, 但进服会被拒绝。"
+          },
+          "response": []
+        },
+        {
+          "name": "重置玩家认证",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/whitelist/by-name/{{player_name}}/reset-auth",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "whitelist",
+                "by-name",
+                "{{player_name}}",
+                "reset-auth"
+              ]
+            },
+            "description": "清除密码记录并吊销免密登记。白名单条目本身不受影响。无请求体。"
+          },
+          "response": []
+        },
+        {
+          "name": "批量添加",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"operation\": \"add\",\n  \"source\": \"ADMIN\",\n  \"added_by_name\": \"AdminUser\",\n  \"players\": [\n    { \"name\": \"Player1\" },\n    { \"name\": \"Player2\" }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/whitelist/batch",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "whitelist",
+                "batch"
+              ]
+            },
+            "description": "单次最多 100 个。批量添加会立即写入生成的 UUID, 不走登录补充流程。部分成功返回 HTTP 207。"
+          },
+          "response": []
+        },
+        {
+          "name": "批量删除",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"operation\": \"remove\",\n  \"players\": [\n    { \"uuid\": \"{{player_uuid}}\" }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/whitelist/batch",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "whitelist",
+                "batch"
+              ]
+            },
+            "description": "按 uuid 定位。"
+          },
+          "response": []
+        },
+        {
+          "name": "批量禁用",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"operation\": \"disable\",\n  \"players\": [\n    { \"name\": \"Player1\" },\n    { \"name\": \"Player2\" }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/whitelist/batch",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "whitelist",
+                "batch"
+              ]
+            },
+            "description": "按 name 定位。operation 改为 enable 即批量启用。"
+          },
+          "response": []
+        },
+        {
+          "name": "签发绑定码",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{player_name}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/whitelist/regcode",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "whitelist",
+                "regcode"
+              ]
+            },
+            "description": "仅发码, 不改动白名单。注册码校验已停用, 签出的码目前只对游戏内 /enroll 有效。"
+          },
+          "response": []
+        },
+        {
+          "name": "白名单统计",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/whitelist/stats",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "whitelist",
+                "stats"
+              ]
+            },
+            "description": "总数、启用数、按来源分组计数、近 24 小时新增。"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "识别码与 QQ 绑定",
+      "description": "管理员在面板签发识别码, 私聊机器人完成 QQ 认领。",
+      "item": [
+        {
+          "name": "查询我的识别码状态",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{jwt_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/personal-code",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "personal-code"
+              ]
+            },
+            "description": "只认 JWT。只返回掩码前后缀与已绑定的 QQ。"
+          },
+          "response": []
+        },
+        {
+          "name": "签发或重置识别码",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{jwt_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/personal-code",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "personal-code"
+              ]
+            },
+            "description": "只认 JWT。明文识别码仅在本次响应中出现一次。"
+          },
+          "response": []
+        },
+        {
+          "name": "QQ 认领",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"<64 位识别码>\",\n  \"qq\": \"{{qq}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/bot/bind",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "bot",
+                "bind"
+              ]
+            },
+            "description": "供机器人后台调用。识别码无效返回 403, QQ 已绑定其他管理员返回 409。"
+          },
+          "response": []
+        },
+        {
+          "name": "查询 QQ 绑定",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/bot/binding?qq={{qq}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "bot",
+                "binding"
+              ],
+              "query": [
+                {
+                  "key": "qq",
+                  "value": "{{qq}}"
+                }
+              ]
+            },
+            "description": "未绑定或管理员已停用时 bound 为 false。"
+          },
+          "response": []
+        },
+        {
+          "name": "解除 QQ 绑定",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/bot/binding?qq={{qq}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "bot",
+                "binding"
+              ],
+              "query": [
+                {
+                  "key": "qq",
+                  "value": "{{qq}}"
+                }
+              ]
+            },
+            "description": "该 QQ 本就未绑定时返回 404。"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "操作日志",
+      "description": "白名单操作与未授权进服的审计日志。",
+      "item": [
+        {
+          "name": "查询操作日志",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/logs/operations?type=ADD&limit=50&offset=0",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "logs",
+                "operations"
+              ],
+              "query": [
+                {
+                  "key": "type",
+                  "value": "ADD"
+                },
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                }
+              ]
+            },
+            "description": "type 可取 ADD / REMOVE / SET_ACTIVE / GENCODE / RESET_AUTH / UNAUTHORIZED_ACCESS。可选参数: target_uuid / target_name / operator_ip / start_time / end_time。"
+          },
+          "response": []
+        },
+        {
+          "name": "操作日志统计",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/logs/operations/stats",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "logs",
+                "operations",
+                "stats"
+              ]
+            },
+            "description": "按操作类型聚合。时间范围内没有记录的类型不会出现在响应中。"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "玩家与服务器",
+      "description": "玩家数据在服务器主线程采集, 有并发与超时限制。",
+      "item": [
+        {
+          "name": "在线玩家数据",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/player?name={{player_name}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "player"
+              ],
+              "query": [
+                {
+                  "key": "name",
+                  "value": "{{player_name}}"
+                }
+              ]
+            },
+            "description": "并发上限 5, 超出返回 429; 主线程繁忙返回 504。"
+          },
+          "response": []
+        },
+        {
+          "name": "离线玩家数据",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/player?name={{player_name}}&includeOffline=true",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "player"
+              ],
+              "query": [
+                {
+                  "key": "name",
+                  "value": "{{player_name}}"
+                },
+                {
+                  "key": "includeOffline",
+                  "value": "true"
+                }
+              ]
+            },
+            "description": "读取 playerdata 下的 NBT, 部分运行期字段缺席。"
+          },
+          "response": []
+        },
+        {
+          "name": "在线玩家列表",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/server/players",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "server",
+                "players"
+              ]
+            },
+            "description": "名字、UUID、维度、坐标、生命、延迟、游戏模式。"
+          },
+          "response": []
+        },
+        {
+          "name": "服务器性能",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/server/performance",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "server",
+                "performance"
+              ]
+            },
+            "description": "安装 spark 时返回精确的 TPS / MSPT / CPU, 否则降级为估算值。CPU 是 0..1 的比例。"
+          },
+          "response": []
+        },
+        {
+          "name": "公屏广播",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"source\": \"QQ\",\n  \"channel\": \"群名\",\n  \"sender\": \"发言人\",\n  \"content\": \"服务器十分钟后重启\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/server/broadcast",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "server",
+                "broadcast"
+              ]
+            },
+            "description": "sender 与 content 必填。所有字段都会剥掉分节符与控制字符。"
+          },
+          "response": []
+        },
+        {
+          "name": "物品图标",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/item-icon?id=minecraft:diamond_sword",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "item-icon"
+              ],
+              "query": [
+                {
+                  "key": "id",
+                  "value": "minecraft:diamond_sword"
+                }
+              ]
+            },
+            "description": "公开端点, 返回 image/png。"
+          },
+          "response": []
+        },
+        {
+          "name": "线路状态",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/net/nodes",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "net",
+                "nodes"
+              ]
+            },
+            "description": "公开端点。各接入线路的在线人数与连接地址。"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "整合包 (公开)",
+      "description": "启动器在玩家登录前读取。成功响应不带 success / data 包装。",
+      "item": [
+        {
+          "name": "当前发布版本",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    pm.collectionVariables.set(\"pack_version\", pm.response.json().version);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/pack/latest",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "pack",
+                "latest"
+              ]
+            },
+            "description": "没有已发布版本时返回 404。成功后脚本会把版本号存入集合变量 pack_version。"
+          },
+          "response": []
+        },
+        {
+          "name": "版本清单",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/pack/manifest/{{pack_version}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "pack",
+                "manifest",
+                "{{pack_version}}"
+              ]
+            },
+            "description": "只对已发布或已归档的版本可见, 草稿返回 404。"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "整合包 (管理)",
+      "description": "全部只认 JWT, X-API-Key 会被拒绝。请求体不允许出现未列出的字段。",
+      "item": [
+        {
+          "name": "版本列表",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{jwt_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/pack/versions",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "pack",
+                "versions"
+              ]
+            },
+            "description": "含草稿, 按创建时间倒序。"
+          },
+          "response": []
+        },
+        {
+          "name": "新建草稿",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var body = pm.response.json();",
+                  "if (body.success && body.data && body.data.id) {",
+                  "    pm.collectionVariables.set(\"pack_version_id\", String(body.data.id));",
                   "}"
                 ],
                 "type": "text/javascript"
@@ -231,7 +1121,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"expiryHours\": 24\n}",
+              "raw": "{\n  \"version\": \"1.0.0\",\n  \"minecraft\": \"1.20.1\",\n  \"loaderKind\": \"forge\",\n  \"loaderVersion\": \"47.4.20\",\n  \"note\": \"更新说明\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -239,739 +1129,458 @@
               }
             },
             "url": {
-              "raw": "{{base_url}}/admin/generate-token",
-              "host": ["{{base_url}}"],
-              "path": ["admin", "generate-token"]
-            },
-            "description": "生成管理员注册令牌。\n\n**🔒 需要 JWT Token 认证**\n\n## 参数说明\n- `expiryHours`: 令牌有效期（小时），默认24小时\n\n生成的令牌会自动保存到 `registration_token` 变量中。"
-          },
-          "response": [
-            {
-              "name": "生成成功",
-              "originalRequest": {
-                "method": "POST",
-                "header": [],
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n  \"expiryHours\": 24\n}"
-                },
-                "url": {
-                  "raw": "{{base_url}}/admin/generate-token",
-                  "host": ["{{base_url}}"],
-                  "path": ["admin", "generate-token"]
-                }
-              },
-              "status": "OK",
-              "code": 200,
-              "_postman_previewlanguage": "json",
-              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"token\": \"reg_xxxxxxxxxxxxxxxxxxxxxxxxx\",\n    \"expiryHours\": 24,\n    \"message\": \"令牌生成成功\"\n  },\n  \"message\": \"令牌生成成功\",\n  \"timestamp\": 1640995200000\n}"
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "📋 白名单管理",
-      "description": "白名单增删改查操作，基于 WhitelistPlus 设计理念，只需玩家名即可添加白名单",
-      "item": [
-        {
-          "name": "获取白名单列表",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/whitelist?page=1&size=20&search=&sort=created_at&order=desc",
-              "host": ["{{base_url}}"],
-              "path": ["whitelist"],
-              "query": [
-                {
-                  "key": "page",
-                  "value": "1",
-                  "description": "页码，默认为1"
-                },
-                {
-                  "key": "size",
-                  "value": "20",
-                  "description": "每页大小，默认为20"
-                },
-                {
-                  "key": "search",
-                  "value": "",
-                  "description": "搜索关键词（按玩家名搜索）"
-                },
-                {
-                  "key": "sort",
-                  "value": "created_at",
-                  "description": "排序字段 (name, uuid, created_at)"
-                },
-                {
-                  "key": "order",
-                  "value": "desc",
-                  "description": "排序方向 (asc, desc)"
-                }
+              "raw": "{{base_url}}/pack/versions",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "pack",
+                "versions"
               ]
             },
-            "description": "获取白名单列表，支持分页、搜索和排序。\n\n**🔒 需要 API Token 认证**\n\n## 返回字段说明\n- `uuid`: 玩家UUID，为 null 时表示UUID待补充\n- `uuid_pending`: true 表示UUID将在首次登录时自动补充\n- `source`: 添加来源 (API/ADMIN/SYSTEM/PLAYER)"
-          },
-          "response": [
-            {
-              "name": "获取成功",
-              "originalRequest": {
-                "method": "GET",
-                "header": [],
-                "url": {
-                  "raw": "{{base_url}}/whitelist?page=1&size=20",
-                  "host": ["{{base_url}}"],
-                  "path": ["whitelist"],
-                  "query": [
-                    {"key": "page", "value": "1"},
-                    {"key": "size", "value": "20"}
-                  ]
-                }
-              },
-              "status": "OK",
-              "code": 200,
-              "_postman_previewlanguage": "json",
-              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"entries\": [\n      {\n        \"id\": 1,\n        \"uuid\": \"550e8400-e29b-41d4-a716-446655440000\",\n        \"name\": \"Player1\",\n        \"added_by_name\": \"AdminUser\",\n        \"added_by_uuid\": \"admin-uuid-here\",\n        \"added_at\": \"2024-01-01T00:00:00\",\n        \"source\": \"API\",\n        \"is_active\": true,\n        \"created_at\": \"2024-01-01T00:00:00\",\n        \"updated_at\": \"2024-01-01T00:00:00\"\n      },\n      {\n        \"id\": 2,\n        \"uuid\": null,\n        \"name\": \"Player2\",\n        \"added_by_name\": \"AdminUser\",\n        \"added_by_uuid\": \"admin-uuid-here\",\n        \"added_at\": \"2024-01-01T01:00:00\",\n        \"source\": \"API\",\n        \"is_active\": true,\n        \"uuid_pending\": true\n      }\n    ],\n    \"pagination\": {\n      \"page\": 1,\n      \"size\": 20,\n      \"total\": 100,\n      \"total_pages\": 5\n    }\n  },\n  \"timestamp\": 1640995200000\n}"
-            }
-          ]
-        },
-        {
-          "name": "添加白名单条目（完整版）",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"PlayerName\",\n  \"source\": \"API\",\n  \"added_by_name\": \"AdminName\",\n  \"added_by_uuid\": \"admin-uuid-here\",\n  \"added_at\": \"2024-01-01T12:00:00\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": {
-              "raw": "{{base_url}}/whitelist",
-              "host": ["{{base_url}}"],
-              "path": ["whitelist"]
-            },
-            "description": "添加新的白名单条目（完整参数版本）。\n\n**🔒 需要 API Token 认证**\n\n**🎯 新特性：只需玩家名即可添加，UUID会在玩家首次登录时自动补充！**\n\n## 参数说明\n- `name` (必需): 玩家名称\n- `source` (必需): 添加来源 (PLAYER, ADMIN, SYSTEM, API)\n- `added_by_name` (可选): 添加者名称，默认为 \"API\"\n- `added_by_uuid` (可选): 添加者UUID\n- `added_at` (可选): 添加时间，ISO格式"
-          },
-          "response": [
-            {
-              "name": "添加成功",
-              "originalRequest": {
-                "method": "POST",
-                "header": [],
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n  \"name\": \"PlayerName\",\n  \"source\": \"API\"\n}"
-                },
-                "url": {
-                  "raw": "{{base_url}}/whitelist",
-                  "host": ["{{base_url}}"],
-                  "path": ["whitelist"]
-                }
-              },
-              "status": "OK",
-              "code": 200,
-              "_postman_previewlanguage": "json",
-              "body": "{\n  \"success\": true,\n  \"message\": \"玩家添加成功\",\n  \"data\": {\n    \"name\": \"PlayerName\",\n    \"added\": true,\n    \"uuid_pending\": true,\n    \"message\": \"玩家已添加到白名单，UUID将在首次登录时自动补充\"\n  },\n  \"timestamp\": 1640995200000\n}"
-            }
-          ]
-        },
-        {
-          "name": "添加白名单条目（最简版）",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"PlayerName\",\n  \"source\": \"API\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": {
-              "raw": "{{base_url}}/whitelist",
-              "host": ["{{base_url}}"],
-              "path": ["whitelist"]
-            },
-            "description": "添加白名单条目的最简版本。\n\n**🔒 需要 API Token 认证**\n\n只需要玩家名和来源即可，UUID会在首次登录时自动补充。"
+            "description": "loaderKind 取 fabric / quilt / forge / neoforge。成功后脚本会把新版本 id 存入集合变量 pack_version_id。"
           },
           "response": []
         },
         {
-          "name": "删除白名单条目",
+          "name": "复制为草稿",
           "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{jwt_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"version\": \"1.0.1\",\n  \"copyFromVersionId\": {{pack_version_id}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/pack/versions",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "pack",
+                "versions"
+              ]
+            },
+            "description": "只能提交 version 与 copyFromVersionId。会连同全部条目一起复制。"
+          },
+          "response": []
+        },
+        {
+          "name": "修改草稿信息",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{jwt_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"version\": \"1.0.0\",\n  \"minecraft\": \"1.20.1\",\n  \"loaderKind\": \"forge\",\n  \"loaderVersion\": \"47.4.20\",\n  \"note\": \"修改后的说明\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/pack/versions/{{pack_version_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "pack",
+                "versions",
+                "{{pack_version_id}}"
+              ]
+            },
+            "description": "整体替换, note 省略即清空。草稿里已有平台条目时不能改游戏版本与加载器。"
+          },
+          "response": []
+        },
+        {
+          "name": "条目列表",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{jwt_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/pack/versions/{{pack_version_id}}/entries",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "pack",
+                "versions",
+                "{{pack_version_id}}",
+                "entries"
+              ]
+            },
+            "description": "按 path 升序。"
+          },
+          "response": []
+        },
+        {
+          "name": "添加条目",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var body = pm.response.json();",
+                  "if (body.success && body.data && body.data.id) {",
+                  "    pm.collectionVariables.set(\"pack_entry_id\", String(body.data.id));",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{jwt_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"path\": \"mods/example-1.0.0.jar\",\n  \"kind\": \"platform\",\n  \"policy\": \"managed\",\n  \"sha1\": \"3f786850e387550fdab836ed7e6dc881de23001b\",\n  \"size\": 482133,\n  \"downloadUrl\": \"https://cdn.modrinth.com/data/AbCdEfGh/versions/IjKlMnOp/example-1.0.0.jar\",\n  \"platform\": \"modrinth\",\n  \"projectId\": \"AbCdEfGh\",\n  \"projectName\": \"Example Mod\",\n  \"externalVersionId\": \"IjKlMnOp\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/pack/versions/{{pack_version_id}}/entries",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "pack",
+                "versions",
+                "{{pack_version_id}}",
+                "entries"
+              ]
+            },
+            "description": "kind 为 custom 时不得出现 platform / projectId / projectName / externalVersionId。成功后脚本会把条目 id 存入集合变量 pack_entry_id。"
+          },
+          "response": []
+        },
+        {
+          "name": "修改条目",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{jwt_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"path\": \"mods/example-1.0.0.jar\",\n  \"kind\": \"platform\",\n  \"policy\": \"managed\",\n  \"sha1\": \"3f786850e387550fdab836ed7e6dc881de23001b\",\n  \"size\": 482133,\n  \"downloadUrl\": \"https://cdn.modrinth.com/data/AbCdEfGh/versions/IjKlMnOp/example-1.0.0.jar\",\n  \"platform\": \"modrinth\",\n  \"projectId\": \"AbCdEfGh\",\n  \"projectName\": \"Example Mod\",\n  \"externalVersionId\": \"IjKlMnOp\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/pack/entries/{{pack_entry_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "pack",
+                "entries",
+                "{{pack_entry_id}}"
+              ]
+            },
+            "description": "整体替换, 请求体与添加相同。"
+          },
+          "response": []
+        },
+        {
+          "name": "删除条目",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{jwt_token}}",
+                  "type": "string"
+                }
+              ]
+            },
             "method": "DELETE",
             "header": [],
             "url": {
-              "raw": "{{base_url}}/whitelist/:uuid",
-              "host": ["{{base_url}}"],
-              "path": ["whitelist", ":uuid"],
-              "variable": [
+              "raw": "{{base_url}}/pack/entries/{{pack_entry_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "pack",
+                "entries",
+                "{{pack_entry_id}}"
+              ]
+            },
+            "description": "只能删除草稿中的条目。"
+          },
+          "response": []
+        },
+        {
+          "name": "上传自研文件",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
                 {
-                  "key": "uuid",
-                  "value": "550e8400-e29b-41d4-a716-446655440000",
-                  "description": "玩家UUID"
+                  "key": "token",
+                  "value": "{{jwt_token}}",
+                  "type": "string"
                 }
               ]
             },
-            "description": "删除指定UUID的白名单条目。\n\n**🔒 需要 API Token 认证**"
-          },
-          "response": [
-            {
-              "name": "删除成功",
-              "originalRequest": {
-                "method": "DELETE",
-                "header": [],
-                "url": {
-                  "raw": "{{base_url}}/whitelist/550e8400-e29b-41d4-a716-446655440000",
-                  "host": ["{{base_url}}"],
-                  "path": ["whitelist", "550e8400-e29b-41d4-a716-446655440000"]
-                }
-              },
-              "status": "OK",
-              "code": 200,
-              "_postman_previewlanguage": "json",
-              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"message\": \"白名单条目已删除\",\n    \"uuid\": \"550e8400-e29b-41d4-a716-446655440000\"\n  },\n  \"timestamp\": 1640995200000\n}"
-            }
-          ]
-        },
-        {
-          "name": "批量添加白名单",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"operation\": \"add\",\n  \"source\": \"API\",\n  \"added_by_name\": \"AdminName\",\n  \"added_by_uuid\": \"admin-uuid-here\",\n  \"added_at\": \"2024-01-01T12:00:00\",\n  \"players\": [\n    {\n      \"name\": \"Player1\"\n    },\n    {\n      \"name\": \"Player2\"\n    },\n    {\n      \"name\": \"Player3\"\n    }\n  ]\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": {
-              "raw": "{{base_url}}/whitelist/batch",
-              "host": ["{{base_url}}"],
-              "path": ["whitelist", "batch"]
-            },
-            "description": "批量添加白名单条目。\n\n**🔒 需要 API Token 认证**\n\n只需要提供玩家名列表，UUID会在各玩家首次登录时自动补充。"
-          },
-          "response": [
-            {
-              "name": "批量添加成功",
-              "originalRequest": {
-                "method": "POST",
-                "header": [],
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n  \"operation\": \"add\",\n  \"source\": \"API\",\n  \"players\": [\n    {\"name\": \"Player1\"},\n    {\"name\": \"Player2\"}\n  ]\n}"
-                },
-                "url": {
-                  "raw": "{{base_url}}/whitelist/batch",
-                  "host": ["{{base_url}}"],
-                  "path": ["whitelist", "batch"]
-                }
-              },
-              "status": "OK",
-              "code": 200,
-              "_postman_previewlanguage": "json",
-              "body": "{\n  \"success\": true,\n  \"message\": \"批量操作完成\",\n  \"data\": {\n    \"operation\": \"add\",\n    \"total_requested\": 2,\n    \"success_count\": 2,\n    \"failed_count\": 0,\n    \"details\": [\n      {\"name\": \"Player1\", \"success\": true},\n      {\"name\": \"Player2\", \"success\": true}\n    ]\n  },\n  \"timestamp\": 1640995200000\n}"
-            }
-          ]
-        },
-        {
-          "name": "批量删除白名单",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"operation\": \"remove\",\n  \"added_by_name\": \"AdminName\",\n  \"added_by_uuid\": \"admin-uuid-here\",\n  \"players\": [\n    {\n      \"uuid\": \"550e8400-e29b-41d4-a716-446655440000\"\n    },\n    {\n      \"uuid\": \"550e8400-e29b-41d4-a716-446655440001\"\n    }\n  ]\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": {
-              "raw": "{{base_url}}/whitelist/batch",
-              "host": ["{{base_url}}"],
-              "path": ["whitelist", "batch"]
-            },
-            "description": "批量删除白名单条目。\n\n**🔒 需要 API Token 认证**\n\n需要提供要删除玩家的UUID列表。"
-          },
-          "response": []
-        },
-        {
-          "name": "获取白名单统计信息",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/whitelist/stats",
-              "host": ["{{base_url}}"],
-              "path": ["whitelist", "stats"]
-            },
-            "description": "获取白名单统计信息。\n\n**🔒 需要 API Token 认证**\n\n## 返回信息\n- 总条目数\n- 活跃条目数\n- UUID待补充数\n- 近期添加/删除/UUID更新数\n- 来源分解统计\n- 同步状态\n- 缓存状态"
-          },
-          "response": [
-            {
-              "name": "获取成功",
-              "originalRequest": {
-                "method": "GET",
-                "header": [],
-                "url": {
-                  "raw": "{{base_url}}/whitelist/stats",
-                  "host": ["{{base_url}}"],
-                  "path": ["whitelist", "stats"]
-                }
-              },
-              "status": "OK",
-              "code": 200,
-              "_postman_previewlanguage": "json",
-              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"total_entries\": 150,\n    \"active_entries\": 148,\n    \"uuid_pending_entries\": 12,\n    \"recent_additions\": 5,\n    \"recent_deletions\": 2,\n    \"recent_uuid_updates\": 3,\n    \"source_breakdown\": {\n      \"API\": 80,\n      \"ADMIN\": 45,\n      \"SYSTEM\": 20,\n      \"PLAYER\": 5\n    },\n    \"sync_status\": \"active\",\n    \"last_sync\": \"2024-01-01T00:00:00Z\",\n    \"cache_status\": {\n      \"loaded\": true,\n      \"size\": 150,\n      \"last_refresh\": \"2024-01-01T00:00:00Z\"\n    }\n  },\n  \"timestamp\": 1640995200000\n}"
-            }
-          ]
-        },
-        {
-          "name": "手动触发同步",
-          "request": {
             "method": "POST",
             "header": [],
-            "url": {
-              "raw": "{{base_url}}/whitelist/sync",
-              "host": ["{{base_url}}"],
-              "path": ["whitelist", "sync"]
-            },
-            "description": "手动触发白名单同步任务。\n\n**🔒 需要 API Token 认证**\n\n同步会将数据库中的白名单数据同步到 JSON 文件。"
-          },
-          "response": [
-            {
-              "name": "触发成功",
-              "originalRequest": {
-                "method": "POST",
-                "header": [],
-                "url": {
-                  "raw": "{{base_url}}/whitelist/sync",
-                  "host": ["{{base_url}}"],
-                  "path": ["whitelist", "sync"]
-                }
-              },
-              "status": "OK",
-              "code": 200,
-              "_postman_previewlanguage": "json",
-              "body": "{\n  \"success\": true,\n  \"message\": \"同步任务已创建\",\n  \"data\": {\n    \"task_id\": 12345,\n    \"task_type\": \"FULL_SYNC\",\n    \"status\": \"PENDING\",\n    \"created_at\": \"2024-01-01T00:00:00Z\"\n  },\n  \"timestamp\": 1640995200000\n}"
-            }
-          ]
-        },
-        {
-          "name": "获取同步状态",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/whitelist/sync/status",
-              "host": ["{{base_url}}"],
-              "path": ["whitelist", "sync", "status"]
-            },
-            "description": "获取白名单同步状态信息。\n\n**🔒 需要 API Token 认证**\n\n返回同步是否启用、最后同步时间、待处理任务数等信息。"
-          },
-          "response": [
-            {
-              "name": "获取成功",
-              "originalRequest": {
-                "method": "GET",
-                "header": [],
-                "url": {
-                  "raw": "{{base_url}}/whitelist/sync/status",
-                  "host": ["{{base_url}}"],
-                  "path": ["whitelist", "sync", "status"]
-                }
-              },
-              "status": "OK",
-              "code": 200,
-              "_postman_previewlanguage": "json",
-              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"sync_enabled\": true,\n    \"last_sync_time\": \"2024-01-01T00:00:00Z\",\n    \"sync_status\": \"completed\",\n    \"pending_tasks\": 2,\n    \"recent_tasks\": [\n      {\n        \"id\": 12345,\n        \"type\": \"FULL_SYNC\",\n        \"status\": \"COMPLETED\",\n        \"created_at\": \"2024-01-01T00:00:00Z\",\n        \"completed_at\": \"2024-01-01T00:00:05Z\"\n      }\n    ]\n  },\n  \"timestamp\": 1640995200000\n}"
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "👤 用户自助注册",
-      "description": "用户使用注册令牌自助添加到白名单",
-      "item": [
-        {
-          "name": "用户自助注册（完整版）",
-          "request": {
-            "auth": {
-              "type": "noauth"
-            },
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
             "body": {
-              "mode": "raw",
-              "raw": "{\n  \"token\": \"{{registration_token}}\",\n  \"playerName\": \"PlayerName\",\n  \"playerUuid\": \"550e8400-e29b-41d4-a716-446655440000\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": {
-              "raw": "{{base_url}}/register",
-              "host": ["{{base_url}}"],
-              "path": ["register"]
-            },
-            "description": "用户自助注册白名单（提供完整信息）。\n\n**🔓 无需 API Token 认证，但需要有效的注册令牌**\n\n用户需要从管理员处获取注册令牌（鉴权码），使用玩家名称和UUID进行注册。\n\n## 参数说明\n- `token` (必需): 注册令牌，由管理员生成\n- `playerName` (必需): Minecraft 游戏名称\n- `playerUuid` (必需): Minecraft UUID"
-          },
-          "response": [
-            {
-              "name": "注册成功",
-              "originalRequest": {
-                "method": "POST",
-                "header": [],
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n  \"token\": \"reg_xxx\",\n  \"playerName\": \"PlayerName\",\n  \"playerUuid\": \"550e8400-e29b-41d4-a716-446655440000\"\n}"
-                },
-                "url": {
-                  "raw": "{{base_url}}/register",
-                  "host": ["{{base_url}}"],
-                  "path": ["register"]
-                }
-              },
-              "status": "OK",
-              "code": 200,
-              "_postman_previewlanguage": "json",
-              "body": "{\n  \"success\": true,\n  \"message\": \"注册成功\",\n  \"data\": {\n    \"playerName\": \"PlayerName\",\n    \"playerUuid\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"uuid_pending\": false,\n    \"message\": \"注册成功，已添加到白名单\"\n  },\n  \"timestamp\": 1640995200000\n}"
-            }
-          ]
-        },
-        {
-          "name": "用户自助注册（简化版）",
-          "request": {
-            "auth": {
-              "type": "noauth"
-            },
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"token\": \"{{registration_token}}\",\n  \"playerName\": \"PlayerName\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": {
-              "raw": "{{base_url}}/register",
-              "host": ["{{base_url}}"],
-              "path": ["register"]
-            },
-            "description": "用户自助注册白名单（只需玩家名）。\n\n**🔓 无需 API Token 认证，但需要有效的注册令牌**\n\nUUID 将在玩家首次登录时自动补充。"
-          },
-          "response": []
-        }
-      ]
-    },
-    {
-      "name": "🎮 玩家数据查询",
-      "description": "获取玩家详细信息，包括位置、生命值、背包、装备等",
-      "item": [
-        {
-          "name": "查询在线玩家数据",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/player?name=PlayerName",
-              "host": ["{{base_url}}"],
-              "path": ["player"],
-              "query": [
+              "mode": "formdata",
+              "formdata": [
                 {
-                  "key": "name",
-                  "value": "PlayerName",
-                  "description": "玩家名称（区分大小写）"
+                  "key": "file",
+                  "type": "file",
+                  "src": [],
+                  "description": "单个文件, 上限 200 MB"
+                },
+                {
+                  "key": "path",
+                  "value": "config/example.toml",
+                  "type": "text"
+                },
+                {
+                  "key": "policy",
+                  "value": "seeded",
+                  "type": "text"
                 }
               ]
             },
-            "description": "获取在线玩家的详细数据。\n\n**🔒 需要 API Token 认证**\n\n## 返回信息\n- 基本信息：玩家名、UUID、在线状态\n- 位置信息：当前位置、重生点\n- 状态信息：生命值、饥饿值、经验等级\n- 背包信息：主背包、装备栏、主手、副手\n- 末影箱物品\n- 游戏统计数据\n\n**注意：** 此接口默认只返回在线玩家数据。查询离线玩家请使用 `includeOffline=true` 参数。"
+            "url": {
+              "raw": "{{base_url}}/pack/versions/{{pack_version_id}}/upload",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "pack",
+                "versions",
+                "{{pack_version_id}}",
+                "upload"
+              ]
+            },
+            "description": "multipart/form-data, 有且仅有 file / path / policy 三个字段。需要先启用并配置 pack.oss。"
           },
           "response": []
         },
         {
-          "name": "查询离线玩家数据",
+          "name": "版本差异",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var body = pm.response.json();",
+                  "if (body.success && body.data && body.data.revision) {",
+                  "    pm.collectionVariables.set(\"diff_revision\", body.data.revision);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/player?name=PlayerName&includeOffline=true",
-              "host": ["{{base_url}}"],
-              "path": ["player"],
-              "query": [
+            "auth": {
+              "type": "bearer",
+              "bearer": [
                 {
-                  "key": "name",
-                  "value": "PlayerName",
-                  "description": "玩家名称（区分大小写）"
-                },
-                {
-                  "key": "includeOffline",
-                  "value": "true",
-                  "description": "是否查询离线玩家"
+                  "key": "token",
+                  "value": "{{jwt_token}}",
+                  "type": "string"
                 }
               ]
             },
-            "description": "查询离线玩家的基本数据。\n\n**🔒 需要 API Token 认证**\n\n## 返回信息（离线玩家）\n- 玩家名、UUID\n- 首次/最后登录时间\n- 重生点位置\n- 游戏模式（UNKNOWN）\n\n**注意：** 离线玩家只能获取有限的基本信息。"
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/pack/versions/{{pack_version_id}}/diff",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "pack",
+                "versions",
+                "{{pack_version_id}}",
+                "diff"
+              ]
+            },
+            "description": "相对当前发布版本的差异。成功后脚本会把 revision 存入集合变量 diff_revision, 供发布与回滚使用。"
+          },
+          "response": []
+        },
+        {
+          "name": "发布",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{jwt_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"expectedDiffRevision\": \"{{diff_revision}}\",\n  \"confirmRemovals\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/pack/versions/{{pack_version_id}}/publish",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "pack",
+                "versions",
+                "{{pack_version_id}}",
+                "publish"
+              ]
+            },
+            "description": "先请求\"版本差异\"取得修订号并审阅。差异中有移除项时 confirmRemovals 必须为 true。"
+          },
+          "response": []
+        },
+        {
+          "name": "回滚",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{jwt_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"expectedDiffRevision\": \"{{diff_revision}}\",\n  \"confirmRemovals\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/pack/versions/{{pack_version_id}}/rollback",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "pack",
+                "versions",
+                "{{pack_version_id}}",
+                "rollback"
+              ]
+            },
+            "description": "目标必须是曾经发布过的归档版本。同样需要先对目标版本取差异。"
           },
           "response": []
         }
       ]
-    },
-    {
-      "name": "🖥️ 服务器监控",
-      "description": "服务器状态、性能监控和系统资源信息",
-      "item": [
-        {
-          "name": "获取服务器详细信息",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/server/info",
-              "host": ["{{base_url}}"],
-              "path": ["server", "info"]
-            },
-            "description": "获取服务器的详细信息。\n\n**🔒 需要 API Token 认证**"
-          },
-          "response": []
-        },
-        {
-          "name": "获取服务器状态",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/server/status",
-              "host": ["{{base_url}}"],
-              "path": ["server", "status"]
-            },
-            "description": "获取服务器状态信息。\n\n**🔒 需要 API Token 认证**\n\n## 返回信息\n- online: 服务器是否在线\n- spark_available: Spark插件是否可用\n- plugin_version: 插件版本"
-          },
-          "response": [
-            {
-              "name": "获取成功",
-              "originalRequest": {
-                "method": "GET",
-                "header": [],
-                "url": {
-                  "raw": "{{base_url}}/server/status",
-                  "host": ["{{base_url}}"],
-                  "path": ["server", "status"]
-                }
-              },
-              "status": "OK",
-              "code": 200,
-              "_postman_previewlanguage": "json",
-              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"online\": true,\n    \"spark_available\": true,\n    \"plugin_version\": \"0.5.0\",\n    \"timestamp\": 1640995200000\n  },\n  \"timestamp\": 1640995200000\n}"
-            }
-          ]
-        },
-        {
-          "name": "获取服务器性能数据",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/server/performance",
-              "host": ["{{base_url}}"],
-              "path": ["server", "performance"]
-            },
-            "description": "获取服务器性能数据。\n\n**🔒 需要 API Token 认证**\n\n## 返回信息\n- TPS (每秒刻数): 1分钟/5分钟/15分钟平均值\n- MSPT (每刻毫秒): 1分钟/5分钟/15分钟平均值\n- 内存使用: 已用/最大/空闲\n- CPU使用: 进程/系统\n\n当服务器安装了 Spark 插件时，会使用 Spark 提供的高精度数据。"
-          },
-          "response": [
-            {
-              "name": "获取成功",
-              "originalRequest": {
-                "method": "GET",
-                "header": [],
-                "url": {
-                  "raw": "{{base_url}}/server/performance",
-                  "host": ["{{base_url}}"],
-                  "path": ["server", "performance"]
-                }
-              },
-              "status": "OK",
-              "code": 200,
-              "_postman_previewlanguage": "json",
-              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"tps\": {\n      \"values\": {\n        \"last_1m\": 20.0,\n        \"last_5m\": 19.8,\n        \"last_15m\": 19.5\n      }\n    },\n    \"mspt\": {\n      \"values\": {\n        \"last_1m\": 15.2,\n        \"last_5m\": 16.1,\n        \"last_15m\": 17.3\n      }\n    },\n    \"memory\": {\n      \"used\": 2048,\n      \"max\": 4096,\n      \"free\": 2048\n    },\n    \"cpu\": {\n      \"process\": 25.5,\n      \"system\": 45.2\n    },\n    \"timestamp\": 1640995200000\n  },\n  \"timestamp\": 1640995200000\n}"
-            }
-          ]
-        },
-        {
-          "name": "获取在线玩家数量",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/players/online",
-              "host": ["{{base_url}}"],
-              "path": ["players", "online"]
-            },
-            "description": "获取当前在线玩家数量。\n\n**🔒 需要 API Token 认证**"
-          },
-          "response": []
-        },
-        {
-          "name": "获取详细玩家列表",
-          "request": {
-            "auth": {
-              "type": "noauth"
-            },
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/players/list",
-              "host": ["{{base_url}}"],
-              "path": ["players", "list"]
-            },
-            "description": "获取详细的在线玩家列表。\n\n**🔓 此端点无需认证（公开端点）**"
-          },
-          "response": []
-        },
-        {
-          "name": "获取世界列表",
-          "request": {
-            "auth": {
-              "type": "noauth"
-            },
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/worlds/list",
-              "host": ["{{base_url}}"],
-              "path": ["worlds", "list"]
-            },
-            "description": "获取服务器世界列表及相关信息。\n\n**🔓 此端点无需认证（公开端点）**"
-          },
-          "response": []
-        },
-        {
-          "name": "获取系统资源信息",
-          "request": {
-            "auth": {
-              "type": "noauth"
-            },
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/system/resources",
-              "host": ["{{base_url}}"],
-              "path": ["system", "resources"]
-            },
-            "description": "获取系统资源使用情况。\n\n**🔓 此端点无需认证（公开端点）**"
-          },
-          "response": []
-        },
-        {
-          "name": "健康检查",
-          "request": {
-            "auth": {
-              "type": "noauth"
-            },
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/health",
-              "host": ["{{base_url}}"],
-              "path": ["health"]
-            },
-            "description": "健康检查端点，用于监控服务状态。\n\n**🔓 此端点无需认证（公开端点）**\n\n## 返回信息\n- status: 服务状态\n- uptime: 运行时间\n- version: 插件版本\n- components: 各组件健康状态"
-          },
-          "response": [
-            {
-              "name": "健康检查成功",
-              "originalRequest": {
-                "method": "GET",
-                "header": [],
-                "url": {
-                  "raw": "{{base_url}}/health",
-                  "host": ["{{base_url}}"],
-                  "path": ["health"]
-                }
-              },
-              "status": "OK",
-              "code": 200,
-              "_postman_previewlanguage": "json",
-              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"status\": \"healthy\",\n    \"uptime\": 1640995200000,\n    \"version\": \"0.5.0\",\n    \"components\": {\n      \"cache\": \"healthy\",\n      \"data_collector\": \"healthy\"\n    },\n    \"timestamp\": 1640995200000\n  }\n}"
-            }
-          ]
-        }
-      ]
-    }
-  ],
-  "event": [
-    {
-      "listen": "prerequest",
-      "script": {
-        "type": "text/javascript",
-        "exec": [""]
-      }
-    },
-    {
-      "listen": "test",
-      "script": {
-        "type": "text/javascript",
-        "exec": [
-          "// 通用测试：检查响应是否为 JSON 格式",
-          "pm.test(\"Response is JSON\", function () {",
-          "    pm.response.to.be.json;",
-          "});",
-          "",
-          "// 通用测试：检查响应是否包含 success 字段",
-          "pm.test(\"Response has success field\", function () {",
-          "    var jsonData = pm.response.json();",
-          "    pm.expect(jsonData).to.have.property('success');",
-          "});"
-        ]
-      }
     }
   ]
 }

@@ -5,7 +5,7 @@
 
 ## 概述
 
-AccessHub 通过内置 Jetty 暴露一套 RESTful API，用于管理 Minecraft 1.20.1 Forge 服务端的白名单、查询玩家数据与服务器性能。除物品图标端点返回 `image/png` 外，所有端点返回 JSON。
+AccessHub 通过内置 Jetty 暴露一套 RESTful API，用于管理 Minecraft 1.20.1 Forge 服务端的白名单、查询玩家数据与服务器性能、查看各接入线路状态，以及管理与分发整合包。除物品图标端点返回 `image/png` 外，所有端点返回 JSON。
 
 白名单采用"玩家名优先，UUID 后补"策略：加白只需玩家名，UUID 在玩家首次登录时由登录监听器自动补充。
 
@@ -23,6 +23,7 @@ AccessHub 通过内置 Jetty 暴露一套 RESTful API，用于管理 Minecraft 1
 - [物品图标 API](#物品图标-api)
 - [线路接入 API](#线路接入-api)
 - [识别码与 QQ 绑定 API](#识别码与-qq-绑定-api)
+- [整合包分发 API](#整合包分发-api)
 - [UUID 自动补充机制](#uuid-自动补充机制)
 - [错误代码说明](#错误代码说明)
 
@@ -33,7 +34,7 @@ AccessHub 通过内置 Jetty 暴露一套 RESTful API，用于管理 Minecraft 1
 - **字符编码**: `UTF-8`
 - **默认端口**: `22222`（`http.port`），监听地址默认 `0.0.0.0`（`http.host`）
 - **认证方式**: `X-API-Key`（API 令牌）或 `Authorization: Bearer <jwt>`（管理员 JWT）
-- **频率限制**: 服务端**未实现** HTTP 层限流。仅 `/api/v1/player` 有并发闸门（最多 5 个并发查询），`/api/v1/admin/login` 有登录失败次数限制。
+- **频率限制**: 服务端**未实现** HTTP 层限流。仅有三处局部限制：`/api/v1/player` 的并发闸门（最多 5 个并发查询）、`/api/v1/admin/login` 的登录失败次数限制、整合包文件上传的并发与排队上限（同时处理 2 个、另排队 2 个）。
 
 ## 认证系统
 
@@ -59,7 +60,7 @@ max-attempts = 5
 lock-duration-minutes = 15
 ```
 
-首次启动时 `api-token`、`admin-password`、`jwt-secret` 若为空会自动生成并写回配置文件，同时以 WARN 级别打印到控制台（仅此一次），请当场记录。
+启动时 `api-token`、`admin-password`、`jwt-secret` 若为空会自动生成并写回配置文件。其中管理员密码与 API 令牌会以 WARN 级别打印到控制台（仅生成时那一次），JWT 密钥不打印；之后都只能从配置文件读取。内置超级管理员的用户名固定为 `admin`。
 
 ### 三类端点
 
@@ -67,12 +68,16 @@ lock-duration-minutes = 15
 
 #### 1. 公开端点（无需任何凭据）
 
-**只有以下四个**，其余端点一律需要凭据：
+**只有以下六个**，其余端点一律需要凭据：
 
 - `POST /api/v1/admin/login`
 - `POST /api/v1/admin/register`
 - `GET /api/v1/item-icon`（`<img>` 标签无法携带自定义请求头，故必须公开）
 - `GET /api/v1/net/nodes`（面向玩家的线路自查页面匿名访问；只输出各线路人数与连接地址，不含玩家名单与客户端 IP）
+- `GET /api/v1/pack/latest`（启动器在玩家登录前读取当前发布版本）
+- `GET /api/v1/pack/manifest/{version}`（已发布或已归档版本的清单；`{version}` 不符合版本号格式时不算公开端点，会按需要凭据处理）
+
+后两个只对 GET 方法公开。
 
 #### 2. API 令牌端点（`X-API-Key`）
 
@@ -97,6 +102,8 @@ curl -H "Authorization: Bearer eyJhbGciOi..." \
 ```
 
 - `GET /api/v1/admin/me` **只认 JWT**：该端点在路由层放行 `X-API-Key`，但控制器会自行从 `Authorization: Bearer` 或 `X-Auth-Token` 头取 JWT，只带 `X-API-Key` 会拿到 401 `未提供认证token`。
+- `GET` / `POST /api/v1/admin/personal-code` **只认 JWT**：需要知道"当前是哪位管理员"，只带 `X-API-Key` 返回 401。
+- `/api/v1/pack/` 下除上面两个公开 GET 外的全部端点**只认 JWT**：整合包管理会改变全体玩家客户端的发布状态，路由层刻意不让它继承后端与机器人共用的 API 令牌权限。只带 `X-API-Key` 返回 401。
 - 携带有效 JWT 调用 `POST /api/v1/whitelist` 时，服务端会用登录管理员的显示名覆盖请求体中的 `added_by_name`，并把 `added_by_uuid` 记为 `WEBUI`（渠道标记，客户端无法伪造）。
 
 > 服务端**不存在** `X-Admin-Password` 请求头的校验逻辑，请勿使用。`[api.auth] admin-password` 仅用于初始化内置超级管理员账号。
@@ -170,13 +177,31 @@ HTTP 状态码 401。
 | `/api/v1/item-icon` | GET | 按物品 id 返回贴图 PNG（`?id=ns:path`） | 无（公开） |
 | `/api/v1/net/nodes` | GET | 各接入线路的实时人数与连接地址 | 无（公开） |
 
+### 整合包分发
+
+| 端点 | 方法 | 描述 | 认证要求 |
+|------|------|------|----------|
+| `/api/v1/pack/latest` | GET | 当前发布版本的指针 | 无（公开） |
+| `/api/v1/pack/manifest/{version}` | GET | 指定版本的文件清单（已发布或已归档） | 无（公开） |
+| `/api/v1/pack/versions` | GET | 列出全部版本（含草稿） | 仅管理员 JWT |
+| `/api/v1/pack/versions` | POST | 新建草稿，或从已有版本复制为草稿 | 仅管理员 JWT |
+| `/api/v1/pack/versions/{id}` | PUT | 修改草稿的版本信息 | 仅管理员 JWT |
+| `/api/v1/pack/versions/{id}/entries` | GET | 列出某版本的文件条目 | 仅管理员 JWT |
+| `/api/v1/pack/versions/{id}/entries` | POST | 向草稿添加条目 | 仅管理员 JWT |
+| `/api/v1/pack/versions/{id}/upload` | POST | 上传自研文件到 OSS 并登记为条目（multipart） | 仅管理员 JWT |
+| `/api/v1/pack/versions/{id}/diff` | GET | 与当前发布版本的差异及其修订号 | 仅管理员 JWT |
+| `/api/v1/pack/versions/{id}/publish` | POST | 发布草稿 | 仅管理员 JWT |
+| `/api/v1/pack/versions/{id}/rollback` | POST | 回滚到某个已归档版本 | 仅管理员 JWT |
+| `/api/v1/pack/entries/{id}` | PUT | 修改草稿中的条目 | 仅管理员 JWT |
+| `/api/v1/pack/entries/{id}` | DELETE | 删除草稿中的条目 | 仅管理员 JWT |
+
 > **已不存在的端点**：`/api/v1/health`、`/api/v1/server/info`、`/api/v1/server/status`、`/api/v1/players/online`、`/api/v1/players/list`、`/api/v1/worlds/list`、`/api/v1/system/resources`、`/api/v1/register` 在当前实现中均无路由分支，请求会返回 404。在线玩家列表请改用 `/api/v1/server/players`。
 
 ## 响应格式
 
 ### 控制器响应（`ApiResponse`）
 
-绝大多数端点由控制器经 `ApiResponse` 输出，Gson 默认不序列化 null，因此值为 null 的字段会**整个键缺失**，客户端应按"字段不存在"处理。
+绝大多数端点由控制器经 `ApiResponse` 输出，Gson 默认不序列化 null，因此值为 null 的字段会**整个键缺失**，客户端应按"字段不存在"处理。整合包管理端点是例外，见下方[整合包端点的两处例外](#整合包端点的两处例外)。
 
 成功：
 
@@ -203,7 +228,10 @@ HTTP 状态码 401。
 
 - `timestamp` 是 ISO-8601 本地时间字符串（`yyyy-MM-ddTHH:mm:ss[.SSS]`），**不是**毫秒数。
 - `message` 仅在控制器显式传入时才存在。
-- **`code` 字段不可靠，请以 HTTP 状态码为准**：`ApiResponse.success(...)` 恒把 `code` 置为 200（即使 HTTP 是 201/207），`ApiResponse.error(...)` 恒置为 500（即使 HTTP 是 409/429/504），只有 `badRequest` / `notFound` 的 400 / 404 与 HTTP 一致。
+- **`code` 字段请以 HTTP 状态码为准**。多数控制器在写出前会把 `code` 对齐到 HTTP 状态码（白名单、操作日志、注册令牌、识别码与 QQ 绑定、公屏广播、整合包管理与上传）。但以下三组端点没有做这一步，`code` 仍是 `ApiResponse` 工厂方法的默认值（成功恒 200，`error(...)` 恒 500，只有 400 / 404 与 HTTP 一致）：
+  - 管理员认证：`/api/v1/admin/login`、`/api/v1/admin/register`、`/api/v1/admin/me`（HTTP 401 时响应体 `code` 为 500）
+  - 玩家数据：`/api/v1/player`（HTTP 429 / 504 时 `code` 为 500）
+  - 服务器监控：`/api/v1/server/players`、`/api/v1/server/performance`（HTTP 504 时 `code` 为 500）
 
 ### 路由器响应（`ApiRouter` 自身产生的错误）
 
@@ -221,6 +249,11 @@ HTTP 状态码 401。
 ```
 
 此处 `error` 是对象，`timestamp` 是毫秒数。物品图标端点的错误响应也是这种结构。
+
+### 整合包端点的两处例外
+
+- **公开端点的成功响应不带包装**。`GET /api/v1/pack/latest` 与 `GET /api/v1/pack/manifest/{version}` 成功时直接返回业务 JSON 对象本身，没有 `success` / `data` / `code` 这一层，键名为 snake_case。失败（404）时仍是上面的 `ApiResponse` 结构。
+- **管理端点显式输出 null**。`/api/v1/pack/versions`、`/api/v1/pack/entries` 系列的成功响应中，值为空的字段以 `null` 输出而不是省略键（如草稿的 `publishedAt`、自研条目的 `platform`），这是与前端约定的契约。
 
 ## 白名单管理 API
 
@@ -309,7 +342,7 @@ HTTP 状态码 401。
 
 **参数说明：**
 
-- `name`（必需）：玩家名。控制器只校验长度 1-64；但底层 `WhitelistManager` 要求 **3-16 位 `[a-zA-Z0-9_]`**，不满足会静默返回失败 → HTTP 409。
+- `name`（必需）：玩家名，须为 **3-16 位 `[a-zA-Z0-9_]`**，不满足返回 400 `玩家名格式无效: 需为 3-16 位字母、数字或下划线`（空白或超过 64 位时消息为 `玩家名称格式无效`）。
 - `source`（必需）：来源，枚举 `WhitelistEntry.Source` 只接受 **`PLAYER`、`ADMIN`、`SYSTEM`** 三个值。传其它值（含 `API`）返回 400 `来源类型无效`。
 - `added_by_name`（可选）：添加者名，缺省 `API`。
 - `added_by_uuid`（可选）：添加者标识，兼作渠道标记，缺省 `API`。仅在提供了 `added_by_name` 时才读取此字段。
@@ -338,14 +371,14 @@ HTTP 状态码 401。
     "code_expires_minutes": 1440
   },
   "message": "玩家添加成功",
-  "code": 200,
+  "code": 201,
   "timestamp": "2026-08-02T08:59:00.217"
 }
 ```
 
 `registration_code` / `code_expires_minutes` 仅在玩家离线认证启用（`[auth] enabled = true`）时随回执一并签发，否则这两个键缺席。
 
-**错误：** 缺少 `name` 或 `source` 返回 400；玩家已在白名单中或写库失败返回 409 `玩家已在白名单中或添加失败`。
+**错误：** 缺少 `name` 或 `source`、玩家名格式无效、来源类型无效、`added_at` 格式错误均返回 400；玩家已在白名单中或写库失败返回 409 `玩家已在白名单中或添加失败`。
 
 ### `DELETE /api/v1/whitelist/{uuid}`
 
@@ -811,7 +844,20 @@ JSON 同步功能已移除，此端点保留为兼容桩，不执行任何同步
 }
 ```
 
-> 当前实际写入日志的操作类型只有 4 种，全部来自白名单端点：`ADD`、`REMOVE`、`SET_ACTIVE`、`GENCODE`。`execution_time` 单位为毫秒；`operator_ip` 优先取 `X-Forwarded-For` 首段，其次 `X-Real-IP`，最后连接远端地址。
+当前实际写入日志的操作类型有 6 种：
+
+| `operation_type` | 来源 |
+|------------------|------|
+| `ADD` | `POST /api/v1/whitelist` |
+| `REMOVE` | 两个 `DELETE /api/v1/whitelist/...` |
+| `SET_ACTIVE` | `PUT .../status` |
+| `GENCODE` | `POST /api/v1/whitelist/regcode` |
+| `RESET_AUTH` | `POST .../reset-auth` |
+| `UNAUTHORIZED_ACCESS` | 不来自 HTTP：登录监听器因白名单拒绝玩家进服时写入（不在白名单、条目被禁用、严格模式下查询失败）。`response_status` 恒为 403，`operator_agent` 为 `Minecraft Client`，`operator_ip` 是该玩家的来源 IP |
+
+> `execution_time` 单位为毫秒。HTTP 来源的日志中，`operator_ip` 优先取 `X-Forwarded-For` 首段，其次 `X-Real-IP`，最后连接远端地址。
+>
+> `SET_ACTIVE` 与 `GENCODE` 在数据库结构 v7 之前被表的 CHECK 约束拒收，因此较早的库里查不到这两类的历史记录。批量操作（`/whitelist/batch`）不写操作日志。
 
 ### `GET /api/v1/logs/operations/stats`
 
@@ -824,11 +870,12 @@ JSON 同步功能已移除，此端点保留为兼容桩，不执行任何同步
   "success": true,
   "data": {
     "add": 120,
+    "unauthorized_access": 42,
     "remove": 8,
-    "batch_add": 0,
-    "batch_remove": 0,
-    "update": 0,
-    "total": 131
+    "gencode": 5,
+    "set_active": 3,
+    "reset_auth": 1,
+    "total": 179
   },
   "message": "统计成功",
   "code": 200,
@@ -836,7 +883,7 @@ JSON 同步功能已移除，此端点保留为兼容桩，不执行任何同步
 }
 ```
 
-> 该端点按硬编码的 `ADD` / `REMOVE` / `BATCH_ADD` / `BATCH_REMOVE` / `UPDATE` 五类分别计数。由于当前无处写入 `BATCH_*` / `UPDATE`，这三项恒为 0；而实际存在的 `SET_ACTIVE` 与 `GENCODE` 不出现在分项里，只计入 `total`，因此**分项之和通常小于 `total`**。
+> 分项直接从库里按 `operation_type` 聚合，键名为类型的小写形式，按条数降序排列，`total` 等于各分项之和。**时间范围内一条都没有的类型不会出现在响应里**，客户端应把缺失的键当作 0，不要假设固定的键集合。
 
 ## 玩家数据查询 API
 
@@ -1019,7 +1066,7 @@ curl -H "X-API-Key: sk-your-api-token-here" \
 | `uuid` | string | 玩家 UUID |
 | `online` | boolean | 是否在线（**字段名为 `online`，不是 `isOnline`**） |
 | `gameMode` | string | 游戏模式，小写：`survival` / `creative` / `adventure` / `spectator` |
-| `ping` | int | 延迟毫秒（仅在线） |
+| `ping` | int | 延迟毫秒（仅在线）。`latency.probe-enabled` 开启时（默认）是主动 Ping/Pong 探针的估计值，关闭后回落到原版 keep-alive 口径（约两分钟才收敛）。`/api/v1/server/players` 的 `ping` 同此口径 |
 | `location.dimension` | string | 维度注册名，如 `minecraft:overworld`（**不是** `NORMAL`/`NETHER`） |
 | `location.x/y/z` | double | 坐标 |
 | `location.yaw/pitch` | float | 视角 |
@@ -1297,18 +1344,18 @@ curl http://your-server:22222/api/v1/net/nodes
   "data": {
     "nodes": [
       {
-        "id": "gz",
-        "name": "阿里云广州",
-        "endpoint": "gz.mcwok.cn:25565",
-        "probeUrl": "wss://gz.mcwok.cn/probe",
+        "id": "guangzhou",
+        "name": "广州线",
+        "endpoint": "guangzhou.mcwok.cn:25565",
+        "probeUrl": "wss://guangzhou.mcwok.cn/probe",
         "online": 3,
         "connecting": 0
       },
       {
-        "id": "home",
-        "name": "家宽直连",
-        "endpoint": "home.mcwok.cn:25565",
-        "probeUrl": "wss://home.mcwok.cn/probe",
+        "id": "xiamen",
+        "name": "厦门联通专线",
+        "endpoint": "home.shinoyuki.cn:25565",
+        "probeUrl": "wss://home.shinoyuki.cn:8443/probe",
         "online": 8,
         "connecting": 1
       }
@@ -1367,14 +1414,18 @@ bind-host = "127.0.0.1"  # 对外一律经反代终结 TLS, 探针本身不直�
 port = 25610
 
 [[network.nodes]]
-id = "gz"
-display-name = "阿里云广州"
-listen-port = 25601      # 须与 frpc 配置里该线路 proxy 的 localPort 一致
-endpoint = "gz.mcwok.cn:25565"
-probe-url = "wss://gz.mcwok.cn/probe"
+id = "guangzhou"
+display-name = "广州线"
+listen-port = 25606      # 须与 frpc 配置里该线路 proxy 的 localPort 一致
+endpoint = "guangzhou.mcwok.cn:25565"
+probe-url = "wss://guangzhou.mcwok.cn/probe"
 ```
 
-完整的 frp、nginx、证书与 DNS 部署配置见 `deploy/network/`。
+`display-name`、`endpoint`、`probe-url` 这类展示项改完后 `/accesshub reload` 即生效；入口端口在启动时绑定，增删线路或改 `listen-port` 需要重启服务器。
+
+给已在运行的服务器升级 jar 时，`[network]` 段**不会**自动出现在 `common.toml` 里（完整默认配置只在文件不存在时写入），读取时静默回退到 `enabled = false`。需要手工把上面的配置段补进去。
+
+完整的 frp、nginx、证书与 DNS 部署配置见 [deploy/network/README.md](deploy/network/README.md)。
 
 ## 识别码与 QQ 绑定 API
 
@@ -1488,6 +1539,377 @@ probe-url = "wss://gz.mcwok.cn/probe"
 
 配套的公屏发言端点见 [`POST /api/v1/server/broadcast`](#post-apiv1serverbroadcast)。
 
+## 整合包分发 API
+
+服务端维护整合包的版本与文件清单，启动器（Aurora）据此同步客户端文件，服务端还可以在进服时按版本拦截未更新的玩家。
+
+数据模型：
+
+- **版本**有三种状态：`draft`（草稿，可编辑）→ `published`（当前发布，全局**最多一个**）→ `archived`（曾经发布过，已被替换）。已发布与已归档的版本不可修改，要改只能复制成新草稿。
+- **条目**是版本里的一个文件，`kind` 取 `platform`（来自 Modrinth / CurseForge，带平台元数据）或 `custom`（自研文件，通常经上传端点进 OSS）。
+- **同步策略** `policy` 取 `managed` / `seeded` / `optional`。服务端只校验取值并原样下发，具体含义由启动器解释。
+
+公开端点与管理端点的鉴权、响应包装都不同，见[认证系统](#认证系统)与[整合包端点的两处例外](#整合包端点的两处例外)。
+
+### `GET /api/v1/pack/latest`
+
+公开端点。返回当前发布版本的指针，响应头 `Cache-Control: no-cache, no-store`。
+
+```json
+{
+  "pack_id": "wok",
+  "version": "1.4.2",
+  "manifest_url": "https://api.mcwok.cn/api/v1/pack/manifest/1.4.2",
+  "released_at": "2026-08-23T09:15:42Z",
+  "note": "修复若干模组冲突",
+  "min_launcher_version": "0.1.0"
+}
+```
+
+| 字段 | 说明 |
+|------|------|
+| `pack_id` | 恒为 `wok` |
+| `version` | 当前发布版本号 |
+| `manifest_url` | 清单地址。**前缀 `https://api.mcwok.cn/api/v1/pack/manifest/` 写死在代码里**，与本实例实际的监听地址无关 |
+| `released_at` | 首次发布时间，ISO-8601 UTC。回滚回来的版本仍显示它最初的发布时间 |
+| `note` | 更新说明，未填时为 `null` |
+| `min_launcher_version` | 恒为 `0.1.0` |
+
+没有任何已发布版本时返回 404 `No published pack version`。
+
+### `GET /api/v1/pack/manifest/{version}`
+
+公开端点。返回指定版本的完整文件清单，只对 `published` 与 `archived` 状态的版本可见，草稿返回 404。
+
+已发布版本不可变，因此成功响应带 `Cache-Control: public, max-age=31536000, immutable`；404 响应带 `no-store`。
+
+```json
+{
+  "schema": 1,
+  "pack_id": "wok",
+  "version": "1.4.2",
+  "minecraft": "1.20.1",
+  "loader": { "kind": "forge", "version": "47.4.20" },
+  "files": [
+    {
+      "path": "mods/example-1.0.0.jar",
+      "sha1": "3f786850e387550fdab836ed7e6dc881de23001b",
+      "size": 482133,
+      "policy": "managed",
+      "urls": [
+        "https://cdn.example.com/wok/files/3f/78/3f786850e387550fdab836ed7e6dc881de23001b",
+        "https://example-bucket.oss-cn-hangzhou.aliyuncs.com/files/3f/78/3f786850e387550fdab836ed7e6dc881de23001b"
+      ]
+    }
+  ]
+}
+```
+
+- `files` 按 `path` 升序。
+- `urls` 按优先级排列，客户端应依次尝试并以 `sha1` 校验。条目的下载地址以 `pack.oss.public-base-url`（自有 CDN）开头时，服务端会追加一个把前缀换成 OSS 直连地址的兜底项；其余条目（如仍指向平台 CDN 的）只有一个地址。未配置 `pack.oss` 或 CDN 基址与 OSS 直连地址相同时不追加。兜底地址由配置推导、不入库，这三项配置在启动时读取，改动后需重启。
+- `{version}` 须匹配 `[0-9A-Za-z][0-9A-Za-z._+-]{0,127}`。不匹配时该路径不再是公开端点：无凭据返回 401，带 JWT 返回 404。
+
+### 管理端点的通用约定
+
+以下端点全部**只认管理员 JWT**。
+
+- 请求体必须是 JSON 对象，且**不允许出现未列出的字段**，否则 400 `请求体包含未知字段: <名字>`。
+- 路径里的 `{id}` 必须是正整数，否则 400。
+- 时间字段 `createdAt` / `publishedAt` 是 **Unix 秒**（数值），不是 ISO 字符串。
+
+**版本对象：**
+
+```json
+{
+  "id": 12,
+  "version": "1.4.3",
+  "status": "draft",
+  "minecraft": "1.20.1",
+  "loaderKind": "forge",
+  "loaderVersion": "47.4.20",
+  "note": null,
+  "createdAt": 1787476542,
+  "publishedAt": null
+}
+```
+
+**条目对象：**
+
+```json
+{
+  "id": 340,
+  "versionId": 12,
+  "path": "mods/example-1.0.0.jar",
+  "kind": "platform",
+  "policy": "managed",
+  "sha1": "3f786850e387550fdab836ed7e6dc881de23001b",
+  "size": 482133,
+  "downloadUrl": "https://cdn.modrinth.com/data/AbCdEfGh/versions/IjKlMnOp/example-1.0.0.jar",
+  "platform": "modrinth",
+  "projectId": "AbCdEfGh",
+  "projectName": "Example Mod",
+  "externalVersionId": "IjKlMnOp"
+}
+```
+
+**字段校验规则**（新建与修改共用）：
+
+| 字段 | 规则 |
+|------|------|
+| `version` / `minecraft` / `loaderVersion` | `[0-9A-Za-z][0-9A-Za-z._+-]{0,127}`；`version` 全局唯一，重复返回 409 |
+| `loaderKind` | `fabric` / `quilt` / `forge` / `neoforge` |
+| `path` | 使用正斜杠的相对路径；不得含空段、`.`、`..`、控制字符、`<>:"\|?*`、Windows 保留设备名（`CON`、`NUL`、`COM1` 等）、DOS 短文件名（如 `PROGRA~1`），段尾不得是空格或点；顶层目录不得是 `.aurora` / `saves` / `screenshots` / `logs`。同一版本内路径按**不区分大小写**判重，重复返回 409 |
+| `kind` | `platform` / `custom` |
+| `policy` | `managed` / `seeded` / `optional` |
+| `sha1` | 40 位小写十六进制 |
+| `size` | 非负整数（字节） |
+| `downloadUrl` | 带主机名的 `http` / `https` 绝对地址，不得含用户凭据或 `#` 片段 |
+| `platform` / `projectId` / `projectName` / `externalVersionId` | `kind = platform` 时四项全部必填，`platform` 只能是 `modrinth` 或 `curseforge`；`kind = custom` 时四项都**不得出现**（或为 `null`） |
+
+**错误映射：**
+
+| HTTP | 场景 |
+|------|------|
+| 400 | 请求体非法、字段校验失败、未知字段、ID 非正整数 |
+| 401 | 未携带有效 JWT（含只带 `X-API-Key` 的情况） |
+| 404 | 版本或条目不存在 |
+| 409 | 版本号重复、路径重复、目标不是草稿、差异修订号已过期、存在移除项但未确认、并发修改冲突 |
+| 500 | 数据库故障等内部错误，消息恒为 `整合包管理操作失败` |
+| 503 | 服务未就绪（路由器风格的对象型 `error`） |
+
+### `GET /api/v1/pack/versions`
+
+返回全部版本（含草稿）的版本对象数组，按创建时间倒序。
+
+### `POST /api/v1/pack/versions`
+
+新建草稿，成功返回 HTTP 201 与版本对象。两种用法二选一：
+
+**全新草稿**——`version`、`minecraft`、`loaderKind`、`loaderVersion` 必填，`note` 可选：
+
+```json
+{
+  "version": "1.4.3",
+  "minecraft": "1.20.1",
+  "loaderKind": "forge",
+  "loaderVersion": "47.4.20",
+  "note": "新增两个模组"
+}
+```
+
+**从已有版本复制**——只能提交 `version` 与 `copyFromVersionId`，其余字段必须缺席，否则 400：
+
+```json
+{ "version": "1.4.3", "copyFromVersionId": 11 }
+```
+
+复制会带上源版本的 Minecraft 版本、加载器信息、更新说明与**全部条目**。源版本可以是任意状态，这是修改已发布版本的唯一途径。
+
+### `PUT /api/v1/pack/versions/{id}`
+
+整体替换草稿的版本信息。`version`、`minecraft`、`loaderKind`、`loaderVersion` 全部必填；`note` 省略即清空。
+
+- 目标不是草稿返回 409 `已发布或归档版本不可修改，请先复制为新草稿`。
+- 草稿里已有 `platform` 条目时，`minecraft` / `loaderKind` / `loaderVersion` 不能再改（平台文件与游戏版本、加载器绑定）。此时返回 409，但消息是笼统的 `草稿版本已被其他操作修改或删除`，排查时注意区分。
+
+### `GET /api/v1/pack/versions/{id}/entries`
+
+返回该版本的条目对象数组，按 `path` 升序。对任意状态的版本可用。
+
+### `POST /api/v1/pack/versions/{id}/entries`
+
+向草稿添加一个条目，成功返回 HTTP 201 与条目对象。
+
+```json
+{
+  "path": "mods/example-1.0.0.jar",
+  "kind": "platform",
+  "policy": "managed",
+  "sha1": "3f786850e387550fdab836ed7e6dc881de23001b",
+  "size": 482133,
+  "downloadUrl": "https://cdn.modrinth.com/data/AbCdEfGh/versions/IjKlMnOp/example-1.0.0.jar",
+  "platform": "modrinth",
+  "projectId": "AbCdEfGh",
+  "projectName": "Example Mod",
+  "externalVersionId": "IjKlMnOp"
+}
+```
+
+### `PUT /api/v1/pack/entries/{id}`
+
+整体替换草稿中的一个条目，请求体与添加相同。所属版本不是草稿时返回 409。
+
+### `DELETE /api/v1/pack/entries/{id}`
+
+删除草稿中的一个条目。
+
+```json
+{
+  "success": true,
+  "data": { "id": 340, "deleted": true },
+  "message": "整合包条目删除成功",
+  "code": 200,
+  "timestamp": "2026-08-23T17:15:42.108"
+}
+```
+
+### `POST /api/v1/pack/versions/{id}/upload`
+
+上传一个自研文件到阿里云 OSS，并把它登记为该草稿的 `custom` 条目。需要 `pack.oss.enabled = true` 且 OSS 配置完整。
+
+请求为 `multipart/form-data`，**有且仅有**以下三个字段，多出任何字段都返回 400：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `file` | 文件 | 单个文件，上限 **200 MB** |
+| `path` | 文本 | 条目路径，规则同上表，UTF-8，最长 4096 字节 |
+| `policy` | 文本 | `managed` / `seeded` / `optional` |
+
+```bash
+curl -X POST "http://localhost:22222/api/v1/pack/versions/12/upload" \
+  -H "Authorization: Bearer eyJhbGciOi..." \
+  -F "file=@./config/wok-client.toml" \
+  -F "path=config/wok-client.toml" \
+  -F "policy=seeded"
+```
+
+处理过程：服务端计算文件 SHA-1，以**内容寻址**的对象键 `files/<sha1 前 2 位>/<第 3-4 位>/<sha1>` 写入 OSS，再以 `pack.oss.public-base-url` 加对象键作为 `downloadUrl` 写入条目。相同内容的文件重复上传会落到同一个对象上。
+
+成功返回 HTTP 201，`data` 为条目对象（`kind` 恒为 `custom`，四个平台字段为 `null`）。
+
+| HTTP | 场景 |
+|------|------|
+| 400 | 非 multipart 请求、字段缺失或重复、多余字段、`path` / `policy` 非法 |
+| 404 | 版本不存在 |
+| 409 | 版本不是草稿，或路径与已有条目重复 |
+| 413 | 文件或请求超过 200 MB |
+| 502 | OSS 返回失败，或上传被中断 |
+| 503 | OSS 上传未启用 / 配置无效、上传队列已满、服务正在关闭 |
+| 504 | OSS 上传超时（单次上限 15 分钟） |
+
+注意事项：
+
+- 同时最多处理 2 个上传，另可排队 2 个，再多直接 503 `文件上传队列已满，请稍后重试`。
+- 文件是**先传 OSS、后写条目**。写条目失败（404 / 409）时对象已经留在 OSS 上；由于是内容寻址，它不会污染任何版本，重试时也会复用同一对象。
+- OSS 配置在每次上传时读取，改完 `common.toml` 后 `/accesshub reload` 即可，无需重启。
+
+### `GET /api/v1/pack/versions/{id}/diff`
+
+计算该版本相对**当前发布版本**的差异，用于发布或回滚前的人工审阅。
+
+```json
+{
+  "success": true,
+  "data": {
+    "revision": "9b74c9897bac770ffc029102a200c5de1f0c5a3f7d4e9a1b6c8d2e4f60718293",
+    "publishedVersion": { "id": 11, "version": "1.4.2", "status": "published", "...": "..." },
+    "targetVersion": { "id": 12, "version": "1.4.3", "status": "draft", "...": "..." },
+    "added": [ { "id": 341, "path": "mods/new-mod-2.0.0.jar", "...": "..." } ],
+    "removed": [ { "id": 298, "path": "mods/old-mod-1.2.0.jar", "...": "..." } ],
+    "changed": [
+      {
+        "before": { "id": 300, "path": "mods/example-1.0.0.jar", "...": "..." },
+        "after": { "id": 340, "path": "mods/example-1.0.0.jar", "...": "..." },
+        "changedFields": ["sha1", "size", "downloadUrl", "externalVersionId"]
+      }
+    ]
+  },
+  "message": "整合包版本差异获取成功",
+  "code": 200,
+  "timestamp": "2026-08-23T17:15:42.108"
+}
+```
+
+上例中的 `"...": "..."` 是文档省略记号，实际返回完整的版本对象与条目对象。
+
+- `revision` 是对"当前发布版本 + 目标版本 + 双方全部条目"计算的 SHA-256，64 位小写十六进制。任何一方发生变化，修订号都会变。
+- `publishedVersion` 在尚无发布版本时为 `null`，此时目标的全部条目都算 `added`。
+- 条目按 `path` 精确匹配。`changedFields` 的取值范围：`kind`、`policy`、`sha1`、`size`、`downloadUrl`、`platform`、`projectId`、`projectName`、`externalVersionId`。
+- 目标版本与当前发布版本之间若存在**仅大小写不同**的路径，返回 409 `单次版本切换不能只修改路径大小写`（Windows 客户端无法安全完成这种改名）。
+
+### `POST /api/v1/pack/versions/{id}/publish`
+
+把草稿发布为当前版本。
+
+```json
+{
+  "expectedDiffRevision": "9b74c9897bac770ffc029102a200c5de1f0c5a3f7d4e9a1b6c8d2e4f60718293",
+  "confirmRemovals": true
+}
+```
+
+| 字段 | 必需 | 说明 |
+|------|------|------|
+| `expectedDiffRevision` | 是 | 刚从 `diff` 端点取到的 `revision` |
+| `confirmRemovals` | 否 | 缺省 `false`。差异中存在 `removed` 条目时必须为 `true` |
+
+整个切换在一个事务里完成：服务端重新计算差异并比对修订号，一致才执行，从而保证"发布出去的正是审阅过的那一份"。成功后原发布版本转为 `archived`，目标转为 `published` 并写入 `publishedAt`，响应 `data` 是更新后的版本对象。
+
+| 409 消息 | 含义 |
+|----------|------|
+| `整合包差异已变化，请重新获取并审阅后再执行版本切换` | 取 `diff` 之后草稿或当前发布版本又变了，重新取 `diff` |
+| `发布将移除 N 个条目，必须显式确认` | 有移除项而 `confirmRemovals` 不是 `true` |
+| `已发布或归档版本不可修改，请先复制为新草稿` | 目标不是草稿 |
+| `草稿版本已被其他操作修改，发布未生效` | 并发冲突 |
+
+### `POST /api/v1/pack/versions/{id}/rollback`
+
+把当前发布版本切回某个**已归档**的版本。请求体与 `publish` 完全相同，同样需要先对目标版本取 `diff`。
+
+目标必须是曾经发布过的归档版本，否则 409 `只能回滚到曾经发布过的归档版本`。回滚不改写目标的 `publishedAt`。
+
+### 典型发布流程
+
+```bash
+JWT="eyJhbGciOi..."
+BASE="http://localhost:22222/api/v1"
+
+# 1. 从当前发布版本复制出草稿
+curl -X POST "$BASE/pack/versions" -H "Authorization: Bearer $JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"version":"1.4.3","copyFromVersionId":11}'
+
+# 2. 增删改条目、上传自研文件（略）
+
+# 3. 取差异，人工审阅 added / removed / changed
+curl "$BASE/pack/versions/12/diff" -H "Authorization: Bearer $JWT"
+
+# 4. 带上审阅过的修订号发布
+curl -X POST "$BASE/pack/versions/12/publish" -H "Authorization: Bearer $JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"expectedDiffRevision":"<第 3 步的 revision>","confirmRemovals":true}'
+```
+
+### 进服版本门控
+
+版本门控不是 HTTP 端点，而是登录流程里的一道检查，由 `pack.version-gate.enabled` 控制，默认关闭。
+
+- **版本怎么上报**：客户端装有本 mod 时，会在 Forge 登录握手的通道版本表里携带通道 `shinoyuki_accesshub:pack_version`，其版本值取自 JVM 系统属性 `shinoyuki.accesshub.pack-version`（由启动器在启动参数里传入）。
+- **服务端怎么判**：与数据库里当前 `published` 版本的版本号做**字符串全等**比较。发布新版本后门控立即按新版本生效，无需改配置。
+- **开启后一律拒绝的情况**：客户端未上报版本（没装本 mod、纯原版客户端、启动器没传参数）、版本不一致、服务端尚无已发布版本、门控查询本身出错。即门控是 fail-closed 的。
+- **拒绝文案**取自 `pack.version-gate.reject-message`，支持 `{current}`（客户端版本）与 `{required}`（要求版本）占位符。
+- **紧急放行**：把 `pack.version-gate.enabled` 改为 `false` 后执行 `/accesshub reload`，立即生效。
+
+客户端上报的版本可以伪造，门控只是防止玩家忘记更新的提示机制，**不是安全凭据**。
+
+**相关配置**（`config/Shinoyuki-Optimize/shinoyuki_accesshub/common.toml`）
+
+```toml
+[pack.version-gate]
+enabled = false
+reject-message = "&c整合包版本不匹配\n&7当前版本: {current}\n&7所需版本: {required}\n&7请使用 Aurora 更新后重试"
+
+[pack.oss]
+enabled = false                 # 自研文件上传总开关
+endpoint = ""                   # 地域 Endpoint, 如 https://oss-cn-hangzhou.aliyuncs.com, 不含 bucket
+bucket = ""
+access-key-id = ""              # 建议用仅授予目标 bucket 写权限的 RAM 子账号
+access-key-secret = ""
+public-base-url = ""            # 客户端下载基地址, 可含 CDN 路径前缀, 如 https://cdn.example.com/wok
+```
+
+`pack.*` 这些键在升级 jar 后会由服务端自动补进已有的 `common.toml`。
+
 ## UUID 自动补充机制
 
 ### 设计理念
@@ -1544,19 +1966,22 @@ id | name       | uuid                                 | source | is_active
 | HTTP 状态码 | 说明 | 常见来源 |
 |------------|------|----------|
 | 200 | 成功 | - |
-| 201 | 创建成功 | `POST /api/v1/whitelist` |
+| 201 | 创建成功 | `POST /api/v1/whitelist`；整合包新建草稿、添加条目、上传文件 |
 | 207 | 批量操作部分成功 | `POST /api/v1/whitelist/batch` |
-| 400 | 请求参数错误 | 缺少必需字段、格式非法、来源类型无效 |
-| 401 | 认证失败 | 缺少/错误的 `X-API-Key` 或 JWT；管理员登录凭据错误 |
-| 404 | 资源不存在 | 玩家条目不存在、玩家不在线、路径无对应路由 |
-| 405 | 方法不支持 | 对已存在路径使用了未实现的方法 |
-| 409 | 冲突 | 玩家已在白名单；玩家认证未启用而请求发码 |
+| 400 | 请求参数错误 | 缺少必需字段、格式非法、来源类型无效、整合包请求体含未知字段 |
+| 401 | 认证失败 | 缺少/错误的 `X-API-Key` 或 JWT；管理员登录凭据错误；对仅 JWT 端点使用 API 令牌 |
+| 403 | 拒绝 | `POST /api/v1/bot/bind` 的识别码无效或目标管理员已停用 |
+| 404 | 资源不存在 | 玩家条目不存在、玩家不在线、整合包版本/条目不存在、路径无对应路由 |
+| 405 | 方法不支持 | 使用了 GET / POST / PUT / DELETE / OPTIONS 之外的方法 |
+| 409 | 冲突 | 玩家已在白名单；玩家认证未启用而请求发码；QQ 已绑定其他管理员；整合包版本号或路径重复、目标不是草稿、差异修订号过期 |
+| 413 | 请求体过大 | 整合包上传文件超过 200 MB |
 | 429 | 并发超限 | `/api/v1/player` 并发查询超过 5 个 |
 | 500 | 服务器内部错误 | 未捕获异常、数据库故障 |
-| 503 | 依赖组件未就绪 | 对应 handler 尚未初始化（服务器启动早期） |
-| 504 | 主线程/采集超时 | `/api/v1/player`、`/api/v1/server/*` |
+| 502 | 上游失败 | 整合包上传时 OSS 返回失败或上传被中断 |
+| 503 | 依赖组件未就绪 | 对应 handler 尚未初始化；玩家认证系统未就绪；OSS 上传未启用或队列已满 |
+| 504 | 主线程/采集/上游超时 | `/api/v1/player`、`/api/v1/server/*`；整合包上传 OSS 超时 |
 
-> 再次提醒：响应体中的 `code` 字段与 HTTP 状态码可能不一致，请以 HTTP 状态码为准。
+> 再次提醒：部分端点响应体中的 `code` 字段与 HTTP 状态码不一致（见[响应格式](#响应格式)），请以 HTTP 状态码为准。
 
 ## 安全最佳实践
 
@@ -1564,12 +1989,12 @@ id | name       | uuid                                 | source | is_active
 
 - 令牌明文存放在服务端 `common.toml`，请限制该文件的读取权限
 - 不要在前端代码里硬编码令牌；浏览器侧应走管理员 JWT
-- 轮换令牌：修改 `[api.auth] api-token` 后重启服务端；置空则下次启动自动重新生成
+- 轮换令牌：修改 `[api.auth] api-token` 后执行 `/accesshub reload` 即生效（令牌在每次请求时从配置读取）；置空则下次启动自动重新生成
 
 ### JWT 安全
 
 - 有效期 24 小时，过期后需重新登录
-- 修改 `[api.auth] jwt-secret` 会立即使所有已签发 token 失效，可作为紧急吊销手段
+- 修改 `[api.auth] jwt-secret` 并**重启服务端**后，所有已签发 token 失效，可作为紧急吊销手段。签名密钥在启动时载入，仅 `/accesshub reload` 不会替换它
 - 避免在 URL 中传递 token
 
 ### 网络安全
@@ -1799,6 +2224,8 @@ Access-Control-Max-Age: 3600
 - `WhitelistManager` 的进程内白名单缓存，用于登录校验，不影响 API 查询（API 直接读库）
 - `ItemIconHandler` 的 PNG 字节缓存（含未命中负缓存），并对客户端下发 `Cache-Control: public, max-age=86400`
 
+另有两个端点只是指示**客户端与中间代理**如何缓存，服务端自身不缓存：`GET /api/v1/pack/latest` 下发 `no-cache, no-store`；`GET /api/v1/pack/manifest/{version}` 成功时下发 `public, max-age=31536000, immutable`（已发布版本的清单不可变）。若在前面挂了 CDN 或反代缓存，请确认它遵守这两个头，否则启动器可能读到过期的发布指针。
+
 ## Spark 集成
 
 安装 spark mod 后，`/api/v1/server/performance` 会经 `me.lucko.spark.api` 提供精确的 TPS / MSPT / CPU 数据。spark 未安装时自动降级：TPS / MSPT 由 `MinecraftServer.getAverageTickTime()` 估算，CPU 数据缺失（`available: false`），内存 / GC / 线程始终由 JVM MXBean 提供，不受影响。
@@ -1806,8 +2233,9 @@ Access-Control-Max-Age: 3600
 ## 版本信息
 
 - **mod id**: `shinoyuki_accesshub`
-- **mod 版本**: 0.3.1
+- **mod 版本**: 0.5.4
 - **API 版本**: v1
+- **数据库结构版本**: 10
 - **运行环境**: Minecraft 1.20.1 + Forge 47.4.20（`[47,)`）
 - **可选依赖**: spark（性能数据精度）
 
@@ -1831,8 +2259,17 @@ A: `cpu.system` / `cpu.process` 是 0..1 的比例，`0.006` 即 0.6%，展示�
 **Q: 查询玩家数据为什么会超时或 429？**
 A: 玩家数据必须在 Minecraft 主线程采集。在线查询超时 3 秒、离线 5 秒；并发上限 5，超出返回 429。
 
-**Q: 为什么日志统计的分项加起来小于 `total`？**
-A: 统计端点只按 `ADD` / `REMOVE` / `BATCH_ADD` / `BATCH_REMOVE` / `UPDATE` 五类分项计数，而实际还会写入 `SET_ACTIVE` 和 `GENCODE` 两类日志，它们只计入 `total`。
+**Q: 为什么日志统计里有时没有 `set_active`、`reset_auth` 这些键？**
+A: 统计端点按库里实际存在的 `operation_type` 聚合，所选时间范围内一条都没有的类型不会出现，按 0 处理即可。
+
+**Q: 整合包管理端点带了正确的 `X-API-Key`，为什么还是 401？**
+A: `/api/v1/pack/` 下除 `latest` 与 `manifest/{version}` 两个公开 GET 外，全部只认管理员 JWT，路由层会直接拒绝 API 令牌。先 `POST /api/v1/admin/login` 取 JWT。
+
+**Q: 整合包发布为什么返回 409 "差异已变化"？**
+A: `expectedDiffRevision` 必须是对**当前状态**取到的修订号。取 `diff` 之后只要草稿或当前发布版本有任何变动，修订号就会失效，重新取一次 `diff` 并审阅后再发布。
+
+**Q: 升级 jar 之后线路统计一直是 0、`relayEnabled` 是 `false`？**
+A: `[network]` 配置段只在 `common.toml` 不存在时生成，升级不会自动补。手工把该段加进配置文件并重启。
 
 ---
 
