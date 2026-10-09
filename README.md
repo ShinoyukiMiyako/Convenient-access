@@ -1,420 +1,240 @@
-# ConvenientAccess
+# AccessHub
 
-一个为 Minecraft 1.20.1 Arclight 服务端设计的全功能白名单管理系统，集成了服务器信息获取、白名单管理、用户认证和安全防护等功能。
+面向 Minecraft 1.20.1 Forge **专用服务器**的运维 mod（mod id `shinoyuki_accesshub`）：白名单与玩家离线认证、内置 HTTP 管理 API、多线路接入统计、整合包分发与版本门控、Tab 列表增强。
 
-## 核心功能
+> 仓库名 `Convenient-access` 是历史遗留。v1 是 Bukkit/Arclight 插件 ConvenientAccess（保留在 tag `v1.0-final`），v2 起整体重写为 Forge mod AccessHub。v1 的源码仍留在 `src/main/java/com/xaoxiao/convenientaccess/` 作参考，**不参与编译，也不再提供任何功能**。
 
-### 白名单管理系统
-- **完整的CRUD操作** - 增加、删除、修改、查询白名单条目
-- **批量操作支持** - 批量添加、删除、导入、导出白名单
-- **高级查询功能** - 支持分页、搜索、排序和多条件筛选
-- **智能同步机制** - 数据库与JSON文件双向同步，支持冲突解决
-- **实时统计信息** - 白名单数量、操作历史、同步状态等
-- **玩家数据查询** - 获取玩家完整数据，包括位置、背包、装备、统计等
-- **操作日志系统** - 记录所有白名单操作,包括操作者、时间、请求数据、执行时间等
-- **数据迁移工具** - 从WhitelistPlus等插件迁移数据,保留完整的添加人信息
+## 功能概览
 
-### 多层安全认证
-- **API密钥认证** - 基础API访问控制
-- **JWT令牌系统** - 管理员身份认证和会话管理
-- **角色权限控制** - 细粒度的权限管理系统
-- **频率限制保护** - 防止API滥用和暴力破解攻击
-- **安全监控系统** - 实时检测异常行为和潜在威胁
+| 模块 | 说明 |
+|------|------|
+| 白名单 | 玩家名优先、UUID 首次登录后补；条目可临时禁用而不删除；LOGIN 协商阶段提前拦截，PLAY 阶段兜底 |
+| 玩家离线认证 | 游戏内 `/register` `/login`，未认证时冻结在登录点并限制一切操作，超时踢出；密码以 bcrypt 存储 |
+| 免密登录（DeviceAuth） | 客户端装同一个 jar 并 `/enroll` 一次后，凭设备 Ed25519 密钥自动完成挑战应答；任何失败静默回退到密码登录 |
+| HTTP 管理 API | 内置 Jetty，默认 `0.0.0.0:22222`；白名单 CRUD、管理员账号与 JWT、操作日志、玩家数据、服务器性能、物品图标 |
+| QQ 机器人对接 | 管理员个人识别码与 QQ 绑定、外部渠道向游戏内公屏发言 |
+| 多线路接入 | 内置 TCP 转发器按入口端口区分线路并统计各线在线人数，解析 PROXY protocol v2 取回玩家真实 IP；内置 WebSocket 延迟探针 |
+| 整合包分发 | 版本草稿/发布/回滚、条目管理、自研文件直传阿里云 OSS、对外公开清单（自有 CDN 优先 + OSS 直连兜底）、进服版本门控 |
+| Tab 列表增强 | 服务端渲染 header/footer（时间、运行时长、TPS、MSPT、CPU、内存）与彩色延迟后缀，客户端无需装 mod |
+| 主动延迟探针 | 以 Ping/Pong 主动测量玩家延迟，取代原版 keep-alive 口径（15 秒采样、约两分钟才收敛） |
+| 数据库备份 | 定时备份 SQLite 数据库，可压缩，按保留天数清理 |
 
-### 高级安全防护
-- **智能威胁检测** - 自动识别暴力破解、API滥用、可疑IP等
-- **实时安全监控** - 记录和分析所有安全事件
-- **自动防护机制** - 自动封禁可疑IP和异常行为
-- **安全事件日志** - 完整的安全审计和追踪能力
+## 运行环境
 
-### 高性能架构
-- **异步任务处理** - 所有数据库操作和I/O操作均为异步执行，确保不阻塞主线程
-- **智能缓存系统** - 实现多层缓存策略，显著降低数据库访问频率，提升响应速度
-- **任务队列管理** - 采用优先级队列和重试机制，保障任务执行的可靠性
-- **数据库优化** - 建立合理索引结构，优化SQL查询语句，减少查询时间
+- Minecraft 1.20.1 + Forge 47.x（按 47.4.20 构建，版本范围 `[47,)`）
+- Java 17
+- 专用服务器。内置服务器（单人存档、对局域网开放）下服务端功能整体不启用，命令也不注册
+- 可选：[spark](https://spark.lucko.me/) mod。装了则性能接口返回精确的 TPS / MSPT / CPU，未装自动降级为 JVM 数据
 
-### 完整的API接口
-- **RESTful API设计** - 遵循标准的HTTP API接口规范
-- **白名单管理API** - 提供完整的白名单CRUD操作接口
-- **玩家数据查询API** - 获取玩家详细信息，包括位置、背包、装备、统计等
-- **管理员认证API** - 支持登录、登出、会话验证等功能
-- **系统监控API** - 提供统计信息、状态查询等监控接口
-- **跨域访问支持** - 支持CORS，便于Web前端集成
+SQLite、Jetty、bcrypt 均已随 jar 打包，无需额外安装。
 
-## 安装要求
+## 安装与首次启动
 
-- Minecraft 1.20.1
-- Arclight 服务端
-- Java 17+
-- SQLite 支持（自动包含）
+1. 把 `shinoyuki_accesshub-<版本>.jar` 放进服务端 `mods/` 目录后启动服务器。mod 不支持热加载，换版本需要重启。
+2. 首次启动会在 `config/Shinoyuki-Optimize/shinoyuki_accesshub/` 下生成配置文件 `common.toml` 与数据库 `whitelist.db`。
+3. 首次启动还会自动生成三样凭据并写回 `common.toml`：
+   - 内置超级管理员 `admin` 的密码（12 位）
+   - API 访问令牌（`sk-` 开头，共 64 位）
+   - JWT 签名密钥
 
-## 安装方法
+   前两项会以 WARN 级别在控制台打印一次，之后只能从配置文件读取。
+4. HTTP API 默认监听 `0.0.0.0:22222`，公网部署请用防火墙或反向代理收口，TLS 在反代上终结。
 
-1. 下载最新版本的 `convenient-access-0.5.0.jar`
-2. 将插件文件放入服务器的 `plugins` 目录
-3. 重启服务器或使用 `/reload` 命令
-4. 插件将自动：
-   - 创建SQLite数据库和所有必要的表
-   - 生成默认管理员账户（用户名：admin，密码：admin123）
-   - 启动HTTP API服务器（默认端口：8080）
-   - 初始化安全监控系统
+> **装上即生效的三个默认值**：`whitelist.enabled`、`whitelist.strict-mode`、`auth.enabled` 默认都是 `true`。给已在运行的服务器首次装上本 mod 后，不在白名单的玩家会被拒绝进服，在白名单的玩家也必须先 `/register`。请先加好白名单，或在首次启动后按需关闭再让玩家进服。
 
-## 系统架构
+## 配置
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    ConvenientAccess 系统架构                 │
-├─────────────────────────────────────────────────────────────┤
-│  API层                                                      │
-│  ┌─────────────────┐  ┌─────────────────┐                  │
-│  │  白名单API      │  │  管理员API      │                  │
-│  │  /api/v1/       │  │  /api/v1/admin/ │                  │
-│  │  whitelist/*    │  │  *              │                  │
-│  └─────────────────┘  └─────────────────┘                  │
-├─────────────────────────────────────────────────────────────┤
-│  安全层                                                      │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────┐ │
-│  │  频率限制器     │  │  安全监控器     │  │  认证过滤器 │ │
-│  │  RateLimiter    │  │  SecurityMonitor│  │  AuthFilter │ │
-│  └─────────────────┘  └─────────────────┘  └─────────────┘ │
-├─────────────────────────────────────────────────────────────┤
-│  业务层                                                      │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────┐ │
-│  │  白名单管理器   │  │  同步任务管理器 │  │  管理员认证 │ │
-│  │  WhitelistMgr   │  │  SyncTaskMgr    │  │  AdminAuth  │ │
-│  └─────────────────┘  └─────────────────┘  └─────────────┘ │
-├─────────────────────────────────────────────────────────────┤
-│  数据层                                                      │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────┐ │
-│  │  SQLite数据库   │  │  JSON文件       │  │  内存缓存   │ │
-│  │  11个数据表     │  │  whitelist.json │  │  实时数据   │ │
-│  └─────────────────┘  └─────────────────┘  └─────────────┘ │
-└─────────────────────────────────────────────────────────────┘
-```
+配置文件为 TOML：`config/Shinoyuki-Optimize/shinoyuki_accesshub/common.toml`。字段注释随文件生成，下表只列分组与用途。
 
-## 数据库结构
+| 配置段 | 用途 | 默认 |
+|--------|------|------|
+| `http` | HTTP 服务器开关、端口、监听地址、线程数、闲置超时 | 启用，`0.0.0.0:22222` |
+| `api.auth` | API 鉴权开关、管理员密码、API 令牌、JWT 密钥、登录失败锁定 | 启用；5 次失败锁 15 分钟 |
+| `api.cors` | 跨域开关与允许的来源 | 启用，`["*"]` |
+| `whitelist` | 白名单开关、严格模式、拒绝文案、欢迎语、OP 加入通知 | 启用，严格模式开 |
+| `auth` | 玩家离线认证开关、登录超时、密码错误上限、密码强度、绑定码有效期 | 启用；60 秒超时，5 次错误踢出 |
+| `auth.device-auth` | 免密登录开关、挑战宽限秒数、服务器实例标识（自动生成，勿改） | 启用；宽限 15 秒 |
+| `backup` | 数据库定时备份：计划 `天:时:分`、保留天数、是否压缩 | 每天 02:00，保留 7 天 |
+| `network` | 多线路转发器开关、入口监听地址、转发目标端口 | **关闭** |
+| `network.probe` | WebSocket 延迟探针开关、监听地址与端口 | **关闭**；`127.0.0.1:25610` |
+| `[[network.nodes]]` | 线路定义：id、展示名、入口端口、玩家连接地址、探针地址 | 七条示例线路 |
+| `pack.version-gate` | 进服整合包版本门控开关与拒绝文案 | **关闭** |
+| `pack.oss` | 自研文件上传的 OSS 端点、Bucket、AccessKey、公开下载基地址 | **关闭** |
+| `tablist` | Tab 列表增强开关、延迟颜色阈值、刷新间隔 | 启用 |
+| `latency` | 主动延迟探针开关、探测间隔、滑动窗口、下发节流 | 启用 |
+| `logging` | 请求日志与调试日志开关 | 关闭 |
 
-系统使用SQLite数据库，包含以下11个核心数据表：
+### 改配置何时生效
 
-- **whitelist** - 白名单主表
-- **admin_users** - 管理员用户表
-- **admin_roles** - 管理员角色表
-- **admin_sessions** - 管理员会话表
-- **auth_logs** - 认证日志表
-- **operation_log** - 操作日志表
-- **sync_tasks** - 同步任务表
-- **security_events** - 安全事件表
-- **registration_tokens** - 注册令牌表
-- **admin_operation_logs** - 管理员操作日志表
-- **indexes** - 数据库索引优化
+改完 `common.toml` 后执行 `/accesshub reload`（可经 RCON 发送）即可重新读取，多数开关即时生效。以下几类在启动时就已绑定或注入，改动后需要重启服务器：
 
-## 配置文件
+- `http.*`（HTTP 服务器只在启动时监听一次）
+- `api.auth` 下的 `jwt-secret` 与 `login-attempt-limit.*`
+- `network` 的入口端口绑定（增删线路、改 `listen-port`）与 `network.probe.*`
+- `backup.*`
+- `pack.oss` 中用于推导清单兜底地址的 `endpoint` / `bucket` / `public-base-url`
 
-插件首次运行时会在 `plugins/ConvenientAccess/` 目录下生成以下文件：
+### 升级已有服务器时的配置补全
 
-### 主配置文件 (config.yml)
-```yaml
-# HTTP服务器配置
-http:
-  enabled: true          # 是否启用HTTP服务器
-  port: 8080            # 监听端口
-  host: "0.0.0.0"       # 监听地址
-  max-threads: 10       # 最大线程数
-  timeout: 30000        # 连接超时时间(毫秒)
+完整默认配置只在 `common.toml` **不存在**时写入。升级 jar 后的行为分两种：
 
-# API配置
-api:
-  version: "v1"         # API版本
-  auth:
-    enabled: true       # 是否启用API认证
-    api-key: "your-api-key-here"  # API密钥
-  rate-limit:
-    enabled: true       # 是否启用请求频率限制
-    requests-per-minute: 60  # 每分钟最大请求数
-    login-requests-per-minute: 10  # 登录请求频率限制
-  cors:
-    enabled: true       # 是否启用CORS
-    allowed-origins: ["*"]   # 允许的源
-
-# 白名单管理配置
-whitelist:
-  auto-sync: true       # 是否自动同步
-  sync-interval: 300    # 同步间隔(秒)
-  backup-enabled: true  # 是否启用备份
-  max-backups: 10      # 最大备份数量
-
-# 安全配置
-security:
-  jwt:
-    secret: "your-jwt-secret-here"  # JWT密钥
-    expiration: 86400   # JWT过期时间(秒)
-  session:
-    timeout: 3600       # 会话超时时间(秒)
-    max-sessions: 100   # 最大会话数
-  monitoring:
-    enabled: true       # 是否启用安全监控
-    cleanup-interval: 3600  # 清理间隔(秒)
-
-# 数据库配置
-database:
-  path: "plugins/ConvenientAccess/whitelist.db"
-  connection-pool-size: 10
-  query-timeout: 30
-
-# 日志配置
-logging:
-  log-requests: true    # 是否记录API请求日志
-  log-security: true    # 是否记录安全事件
-  debug: false         # 是否启用调试模式
-```
-
-### 数据文件
-- **whitelist.db** - SQLite数据库文件
-- **whitelist.json** - JSON格式的白名单文件（与数据库同步）
-- **backups/** - 自动备份目录
-
-## API 文档
-
-ConvenientAccess 提供了完整的 RESTful API 来管理白名单和系统功能。
-
-📖 **详细的 API 文档请参阅：[API.md](./API.md)**
-
-API 文档包含：
-- 所有可用的 API 端点（白名单管理、管理员认证、系统监控）
-- 详细的请求和响应格式
-- 认证和权限要求
-- 使用示例和错误代码
-- 安全最佳实践
-
-### 快速开始
-
-```bash
-# 1. 管理员登录获取JWT令牌
-curl -X POST http://localhost:8080/api/v1/admin/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"admin123"}'
-
-# 2. 获取白名单列表（需要API Key）
-curl -H "X-API-Key: your-api-key" \
-  http://localhost:8080/api/v1/whitelist
-
-# 3. 添加白名单条目
-curl -X POST http://localhost:8080/api/v1/whitelist \
-  -H "X-API-Key: your-api-key" \
-  -H "Content-Type: application/json" \
-  -d '{"uuid":"550e8400-e29b-41d4-a716-446655440000","username":"player1","reason":"新玩家加入"}'
-
-# 4. 获取玩家详细数据
-curl -H "X-API-Key: your-api-key" \
-  http://localhost:8080/api/v1/player/PlayerName
-
-# 5. 获取系统统计信息
-curl -H "X-API-Key: your-api-key" \
-  http://localhost:8080/api/v1/whitelist/stats
-```
+- `pack.*`、`tablist.*`、`latency.*`：每次启动检查，缺失的键会自动补进文件。
+- 其余在后续版本新增的键（典型如整个 `[network]` 段）**不会**自动出现。读取时静默回退到代码内默认值，例如 `network.enabled` 回退为 `false`，转发器不会启动。需要这些功能时须手工把配置段补进 `common.toml`。
 
 ## 命令
 
-插件提供以下管理命令（需要 `convenientaccess.admin` 权限）：
+### 管理命令
 
-### 基础命令
-- `/ca help` - 显示帮助信息
-- `/ca status` - 显示插件运行状态
-- `/ca reload` - 重载插件配置
+`/accesshub`，别名 `/ca`、`/ahub`，要求 OP 等级 2。
 
-### 白名单管理命令
-- `/ca whitelist list [page]` - 显示白名单列表
-- `/ca whitelist add <uuid> <username> [reason]` - 添加白名单条目
-- `/ca whitelist remove <uuid>` - 删除白名单条目
-- `/ca whitelist search <keyword>` - 搜索白名单条目
-- `/ca whitelist stats` - 显示白名单统计信息
+| 命令 | 作用 |
+|------|------|
+| `/accesshub status` | HTTP 服务、白名单开关、严格模式、TPS / MSPT |
+| `/accesshub reload` | 重新读取 `common.toml` |
+| `/accesshub whitelist add <名字>` | 加白名单（UUID 待该玩家首次登录补全） |
+| `/accesshub whitelist remove <名字>` | 移出白名单 |
+| `/accesshub whitelist check <名字>` | 查询是否在白名单 |
+| `/accesshub whitelist list` | 列出最近加入的 10 条与总数 |
+| `/accesshub auth reset <玩家>` | 清除密码记录并吊销免密登记，在线玩家原地降级为未认证 |
+| `/accesshub auth unregister <玩家>` | 同 `auth reset` |
+| `/accesshub auth info <玩家>` | 注册时间、最后登录时间与 IP、失败次数 |
+| `/accesshub auth gencode [玩家]` | 为指定玩家（或全部未注册的白名单玩家）签发一次性绑定码 |
+| `/accesshub help` | 帮助 |
 
-### 同步管理命令
-- `/ca sync now` - 立即执行同步
-- `/ca sync status` - 显示同步状态
-- `/ca sync reset` - 重置同步状态
+### 玩家命令
 
-### 安全管理命令
-- `/ca security status` - 显示安全状态
-- `/ca security events [limit]` - 显示最近的安全事件
-- `/ca security clear` - 清理过期的安全数据
+无权限要求，未认证状态下也可执行。
 
-### 管理员管理命令
-- `/ca admin list` - 显示管理员列表
-- `/ca admin create <username> <password> [role]` - 创建管理员账户
-- `/ca admin sessions` - 显示活跃会话
+| 命令 | 作用 |
+|------|------|
+| `/register <密码> <确认密码>` | 注册，别名 `/reg` |
+| `/login <密码>` | 登录，别名 `/l` |
+| `/changepassword <旧密码> <新密码>` | 修改密码 |
+| `/enroll [绑定码]` | 把当前设备登记为免密设备。已登录时无需绑定码；未登录时须带管理员签发的绑定码 |
 
-### 数据迁移命令
-- `/ca-migrate <json_file_path>` - 从JSON文件迁移addedBy信息到数据库
-  - 示例: `/ca-migrate whitelist.json`
-  - 用途: 从WhitelistPlus迁移数据,恢复玩家添加人信息
-  - 特性: 异步执行,不删除现有数据,只更新SYSTEM添加人
+注册码校验自 0.2.6 起停用：`/register` 两个参数即可完成注册，多带的第三个参数会被忽略。`auth gencode` 签发的绑定码目前只用于 `/enroll`（换了设备又忘记密码时的登记途径）。
 
-## 权限
+## HTTP API
 
-- `convenientaccess.admin` - 管理员权限，允许使用所有命令（默认：OP）
-- `convenientaccess.whitelist.view` - 查看白名单权限（默认：OP）
-- `convenientaccess.whitelist.manage` - 管理白名单权限（默认：OP）
-- `convenientaccess.api.access` - API访问权限（默认：所有人）
-- `convenientaccess.security.view` - 查看安全信息权限（默认：OP）
+基础地址 `http://<服务器>:22222/api/v1`，两种凭据：
 
-## 安全特性
+- `X-API-Key: sk-...`：服务间调用（面板后端、QQ 机器人、问卷后端）。
+- `Authorization: Bearer <JWT>`：管理员经 `POST /api/v1/admin/login` 登录后获得，有效期 24 小时。
 
-### 🔐 多层认证体系
-1. **API密钥认证** - 基础API访问控制
-2. **JWT令牌认证** - 管理员身份验证
-3. **会话管理** - 自动过期和会话限制
-4. **角色权限控制** - 细粒度权限管理
+| 分组 | 路径前缀 | 凭据 |
+|------|----------|------|
+| 白名单 | `/whitelist` | API 令牌或 JWT |
+| 管理员账号 | `/admin` | 登录与注册公开，其余见文档 |
+| 识别码与 QQ 绑定 | `/admin/personal-code`、`/bot` | 前者仅 JWT，后者 API 令牌或 JWT |
+| 操作日志 | `/logs/operations` | API 令牌或 JWT |
+| 玩家与服务器 | `/player`、`/server` | API 令牌或 JWT |
+| 物品图标 | `/item-icon` | 公开 |
+| 线路状态 | `/net/nodes` | 公开 |
+| 整合包（公开） | `GET /pack/latest`、`GET /pack/manifest/{version}` | 公开 |
+| 整合包（管理） | `/pack/versions`、`/pack/entries` | **仅 JWT**，API 令牌会被拒绝 |
 
-### 🛡️ 安全防护机制
-1. **频率限制** - 防止API滥用和暴力破解
-2. **异常检测** - 自动识别可疑行为
-3. **IP封禁** - 自动封禁恶意IP地址
-4. **安全审计** - 完整的操作日志记录
+完整的请求、响应与错误码说明见 [API.md](API.md)。可导入 Postman 的请求集合见 [ConvenientAccess_API_Complete.postman_collection.json](ConvenientAccess_API_Complete.postman_collection.json)。
 
-### 📊 安全监控
-- **实时威胁检测** - 7种威胁类型识别
-- **安全事件记录** - 完整的安全事件日志
-- **自动响应机制** - 自动处理安全威胁
-- **统计分析** - 安全状态统计和分析
+```bash
+# 管理员登录取 JWT
+curl -X POST http://localhost:22222/api/v1/admin/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"<common.toml 里的 admin-password>"}'
 
-## 性能优化
+# 用 API 令牌加白名单
+curl -X POST http://localhost:22222/api/v1/whitelist \
+  -H "X-API-Key: sk-..." -H "Content-Type: application/json" \
+  -d '{"name":"PlayerName","source":"ADMIN"}'
+```
 
-### 高性能设计
-- **异步处理架构** - 采用CompletableFuture实现异步操作，所有数据库查询和I/O操作均不阻塞主线程，确保服务器TPS稳定
-- **多层缓存机制** - 实现内存缓存、查询结果缓存和会话缓存，有效减少重复计算和数据库访问次数
-- **连接池管理** - 使用HikariCP数据库连接池，优化连接获取和释放，提高并发处理能力
-- **索引优化策略** - 对高频查询字段建立索引，优化JOIN操作，显著降低查询延迟
+## 数据与备份
 
-### 性能指标
-- **API响应时间** - 平均响应延迟低于50ms，95%请求在100ms内完成
-- **数据库查询** - 通过索引优化实现单次查询时间低于10ms
-- **内存使用** - 智能缓存策略控制内存占用，运行时内存使用通常低于100MB
-- **并发处理** - 线程池配置支持高并发场景，可处理每秒数百次API请求
-- **主线程影响** - 异步架构确保对服务器主线程零影响，维持稳定TPS
+全部状态集中在 `config/Shinoyuki-Optimize/shinoyuki_accesshub/`，备份这一个目录即可带走所有数据：
 
-## 同步机制
+| 路径 | 内容 |
+|------|------|
+| `common.toml` | 配置与凭据（含明文 API 令牌、OSS 密钥，注意文件权限） |
+| `whitelist.db` | SQLite 数据库（WAL 模式，运行期伴随 `-wal` / `-shm` 文件） |
+| `backup/` | 定时备份 |
+| `upload-tmp/` | 整合包上传的临时文件，启动时自动清理残留 |
 
-### 智能同步
-- **双向同步** - 数据库与JSON文件之间保持双向同步
-- **冲突解决** - 自动检测并解决数据冲突
-- **增量同步** - 仅同步变更数据，减少I/O开销
-- **重试机制** - 同步失败时自动重试
+数据库结构版本当前为 10。启动时自动从旧版本逐级迁移，不支持降级：数据库版本高于程序支持的版本时初始化会失败。因此**回滚到旧版 jar 前必须先恢复对应时期的数据库备份**。
 
-### 任务队列
-- **优先级调度** - 按任务优先级进行调度处理
-- **批量处理** - 优化批量操作的执行效率
-- **状态跟踪** - 提供完整的任务状态管理
-- **错误处理** - 实现智能错误恢复机制
+> mod 初始化失败（数据库打不开、迁移出错等）不会阻止服务器启动：服务器照常开服，但白名单、玩家认证与 HTTP API 全部不生效，此时任何人都能进服。换版后请确认日志里出现 `AccessHub 服务端启动完成`，而不是 `AccessHub 启动失败`。
 
-## 开发信息
+| 表 | 用途 |
+|----|------|
+| `whitelist` | 白名单条目 |
+| `operation_log` | 白名单操作与未授权进服的审计日志 |
+| `admin_users`、`admin_sessions`、`auth_logs`、`registration_tokens` | 管理员账号、会话、认证日志、管理员注册令牌 |
+| `admin_personal_codes`、`admin_qq_bindings` | 个人识别码（仅存哈希）、QQ 绑定 |
+| `player_auth`、`player_registration_codes` | 玩家密码哈希、一次性绑定码（仅存哈希） |
+| `device_keys` | 免密设备公钥 |
+| `pack_version`、`pack_entry` | 整合包版本与文件条目 |
+| `sync_tasks` | v1 JSON 同步的遗留表，当前不使用 |
+| `database_version` | 结构版本号 |
 
-- **版本**: 0.5.0
-- **作者**: xaoxiao
-- **许可证**: MIT
-- **最低 Java 版本**: 17
-- **支持的 Minecraft 版本**: 1.20.1
-- **技术栈**: 
-  - Jetty HTTP Server
-  - SQLite Database
-  - JWT Authentication
-  - Spring Security Crypto
-  - Gson JSON Processing
+## 客户端侧
 
-## 故障排除
+客户端**可以不装**本 mod：白名单与密码登录全部在服务端完成，未装 mod 的客户端和原版客户端都能正常进服。
 
-### HTTP 服务器无法启动
-1. 检查端口是否被占用：`netstat -an | grep 8080`
-2. 确认防火墙设置允许端口访问
-3. 查看服务器日志获取详细错误信息
-4. 尝试更改配置文件中的端口号
+客户端装上同一个 jar 后多出两项能力：
 
-### 数据库连接问题
-1. 检查数据库文件权限：`ls -la plugins/ConvenientAccess/whitelist.db`
-2. 确认SQLite驱动正确加载
-3. 查看插件日志中的数据库错误信息
-4. 尝试删除数据库文件让插件重新创建
+- **免密登录**。`/login` 后执行一次 `/enroll`，此后进服自动认证。设备私钥存放在 `<游戏目录>/shinoyuki_accesshub/device-<服务器实例标识>.key`，Windows 下经 DPAPI（当前用户）封存，其它平台明文存储并在日志中警告。换机、重装系统后密钥失效，用密码登录后重新 `/enroll` 即可。
+- **上报整合包版本**。启动器以 JVM 参数 `-Dshinoyuki.accesshub.pack-version=<版本>` 传入已应用的整合包版本，服务端开启版本门控后据此判定是否放行。
 
-### API认证失败
-1. 检查API密钥是否正确配置
-2. 确认请求头格式：`X-API-Key: your-api-key`
-3. 验证JWT令牌是否过期
-4. 检查管理员账户是否存在且密码正确
+在单人存档里本 mod 不注册命令、不产生网络流量，只在游戏启动时输出一条加载日志。
 
-### 白名单同步问题
-1. 检查JSON文件权限：`ls -la plugins/ConvenientAccess/whitelist.json`
-2. 验证同步任务状态：`/ca sync status`
-3. 手动触发同步：`/ca sync now`
-4. 查看同步任务日志
+## 构建
 
-### 安全监控异常
-1. 检查安全事件日志：`/ca security events`
-2. 清理过期安全数据：`/ca security clear`
-3. 重启安全监控服务：`/ca reload`
-4. 调整安全配置参数
+```bash
+./gradlew build
+```
 
-## 更新日志
+Windows 下用 `gradlew.bat build`。产物是 `build/libs/shinoyuki_accesshub-<版本>.jar`，这是唯一可部署的文件：Jetty 与 bcrypt 已 shade 并 relocate，sqlite-jdbc 以 jarJar 嵌套件形式携带。同目录带 `-dev`、`-jarjaronly` 后缀的 jar 是中间产物，不要放进 `mods/`。
 
-### v0.5.0 (2025-10-02) - WhitelistPlus设计集成
-- 🎯 **重大改进**：基于WhitelistPlus设计理念重构白名单系统
-- ✨ **简化API**：添加白名单现在只需玩家名，UUID可选
-- 🔄 **自动UUID补充**：玩家首次登录时自动补充UUID
-- 📊 **增强统计**：新增UUID待补充状态、来源分解等统计信息
-- 🔧 **批量操作**：支持批量添加和删除操作
-- 📁 **同步系统**：新增UUID更新同步任务类型
-- 🎮 **兼容性**：完美支持离线和正版服务器
+只跑单元测试：
 
-### v0.1.0 (2024-01-01) - 初始版本
-- ✅ **完整的白名单管理系统**
-  - 数据库设计和CRUD操作
-  - 批量操作和高级查询
-  - 智能同步机制
-- ✅ **多层安全认证系统**
-  - API密钥和JWT令牌认证
-  - 管理员角色权限控制
-  - 会话管理和自动过期
-- ✅ **高级安全防护机制**
-  - 频率限制和暴力破解防护
-  - 实时安全监控和威胁检测
-  - 自动响应和IP封禁
-- ✅ **高性能架构设计**
-  - 异步处理和智能缓存
-  - 数据库连接池和索引优化
-  - 任务队列和批量处理
+```bash
+./gradlew test
+```
 
-## 技术特性
+版本号在 `gradle.properties` 的 `mod_version`。
 
-### 🏗️ 系统架构
-- **分层架构设计** - API层、安全层、业务层、数据层
-- **模块化组件** - 50+核心类，高内聚低耦合
-- **插件化扩展** - 支持功能模块动态加载
+> 仓库根目录的 `build.sh`、`build.bat` 以及 `.github/workflows/build.yml` 是 v1 时期的 Maven 脚本，对当前的 Gradle 工程无效，请勿使用。
 
-### 📊 数据管理
-- **11个数据表** - 完整的数据模型设计
-- **双存储机制** - SQLite + JSON文件
-- **智能备份** - 自动备份和版本管理
+## 仓库结构
 
-### 🔧 运维支持
-- **完整的日志系统** - 操作日志、安全日志、错误日志
-- **实时监控** - 系统状态、性能指标、安全事件
-- **管理命令** - 30+管理命令，覆盖所有功能
+```
+src/main/java/com/shinoyuki/accesshub/
+  AccessHubMod.java   mod 入口与装配顺序
+  api/                HTTP 路由（ApiRouter）与各 Controller
+  auth/               管理员认证、玩家离线认证、识别码与 QQ 绑定
+  deviceauth/         免密登录服务端与网络通道
+  client/deviceauth/  免密登录客户端（设备密钥、DPAPI）
+  whitelist/          白名单业务与查询
+  event/              登录拦截、认证冻结、线路认领等事件监听
+  net/                线路转发器、PROXY protocol 解析、WebSocket 探针
+  pack/               整合包版本、条目、发布规划与版本门控
+  modpack/oss/        阿里云 OSS PutObject 客户端
+  tablist/            Tab 列表增强
+  latency/            主动延迟探针
+  command/            游戏内命令
+  config/             common.toml 读写
+  database/           SQLite 连接与结构迁移
+  backup/             数据库备份
+  http/               Jetty 服务器
+src/main/java/com/xaoxiao/convenientaccess/   v1 Bukkit 遗留代码，不参与编译
+src/main/resources/schema/       新库建表脚本
+src/main/resources/migrations/   旧库逐级迁移脚本
+deploy/network/                  多线路接入的 frp / nginx / 证书配置与部署说明
+```
 
-## 生产就绪
+## 文档
 
-ConvenientAccess 已经过完整的开发和测试，具备以下生产特性：
+- [API.md](API.md)：HTTP API 完整说明
+- [deploy/network/README.md](deploy/network/README.md)：多线路接入的部署说明与现网记录
 
-- ✅ **完整性** - 功能完备，覆盖白名单管理全流程
-- ✅ **安全性** - 多层安全防护，企业级安全标准
-- ✅ **性能** - 高性能架构，支持大规模并发
-- ✅ **可维护性** - 模块化设计，易于维护和扩展
-- ✅ **兼容性** - 完全兼容WhitelistPlus，无缝迁移
+## 许可证
 
-系统已通过构建测试，JAR文件大小18.6MB，包含所有依赖，可直接部署使用。
-
-## 支持
-
-如果您遇到问题或有功能建议，请在 GitHub 仓库中创建 Issue。
-
-## 贡献
-
-欢迎提交 Pull Request 来改进这个插件！
+[GNU General Public License v3.0](LICENSE)
